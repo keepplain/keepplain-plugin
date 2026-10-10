@@ -235,7 +235,7 @@ test('the events go to the hooks as the other agents\' do: a JSON event on stdin
     await pi.events.get('session_shutdown')({ reason: 'quit' }, c);
 
     assert.deepEqual(called(), ['hook pi session-start', 'hook pi prompt', 'hook pi stop', 'hook pi session-end']);
-    assert.deepEqual(JSON.parse(calls()[0].input), { hook_event_name: 'session-start', session_id: 'sess-1', transcript_path: sessionFile, cwd: work });
+    assert.deepEqual(JSON.parse(calls()[0].input), { hook_event_name: 'session-start', session_id: 'sess-1', transcript_path: sessionFile, cwd: work, shows_messages: true });
     // The prompt goes to the hook on stdin, for the rules it is about; it is matched there, on this computer.
     assert.equal(JSON.parse(calls()[1].input).prompt, 'Move the queues to Horizon');
     assert.deepEqual(said(c), ['Auto mode is on: this session will be sent.', 'Your agent used 1 Build from KeepPlain in this session. Share yours: /keepplain:build']);
@@ -265,6 +265,22 @@ test('the rules the start hands over go into the system prompt of every run, onc
 
     assert.equal(ext.hookContext('not json'), '');
     assert.equal(ext.withRules('You are Pi.', ''), undefined);
+});
+
+test('without a UI the hook\'s lines are not shown: the model says them, in one run only', async () => {
+    const note = 'KeepPlain has a note for the person.\n> KeepPlain: a line';
+    scenario([
+        { match: '^hook pi stop', out: '' },
+        { match: '^hook pi prompt', out: JSON.stringify({ unsaidContext: note }) },
+    ]);
+    const pi = fakePi();
+    const c = fakeCtx({ hasUI: false });
+    await pi.events.get('agent_settled')({}, c);
+    assert.equal(JSON.parse(calls()[0].input).shows_messages, false);
+    assert.deepEqual(await pi.events.get('before_agent_start')({ prompt: 'go on', systemPrompt: 'You are Pi.' }, c), { systemPrompt: `You are Pi.\n\n${note}` });
+    scenario([{ match: '^hook pi prompt', out: '' }]);
+    assert.equal(await pi.events.get('before_agent_start')({ prompt: 'and on', systemPrompt: 'You are Pi.' }, c), undefined, 'not kept for the runs after it');
+    assert.equal(ext.unsaidContext('not json'), '');
 });
 
 test('a reload keeps the session: neither its start nor its end is a hook, and a session without an id has none', async () => {

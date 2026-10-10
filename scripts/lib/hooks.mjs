@@ -19,7 +19,9 @@
  *   stop           after each answer. Auto mode: sends the session in the background as still going when it grew and
  *                  the last send is five minutes old (lib/auto.mjs, syncIfDue). Otherwise, once per session that used
  *                  Builds from the library and changed code, one line suggesting to share it (lib/nudge.mjs): a JSON
- *                  systemMessage, which both agents show to the person, and the only output Codex takes from a Stop hook.
+ *                  systemMessage, the only output Codex takes from a Stop hook. Where the person does not see one (the
+ *                  Codex app, Cursor, Pi without a UI) the line waits instead, and the next prompt's context (Cursor's
+ *                  postToolUse) asks the model to begin its answer with it (lib/unsaid.mjs).
  *   session-end    auto mode only: hands the session to `auto-send` in the background and returns. Codex ends its hooks'
  *                  processes when it exits, so there the hook waits for the upload as long as its own timeout allows.
  *   tool           Claude Code's PostToolUse, after every tool call, run without the agent waiting for it (async):
@@ -49,6 +51,7 @@ import { sweepPrepared } from './prepared.mjs';
 import { repositoryFacts, rulesAtSessionStart, rulesFetchDue, rulesForPrompt, rulesOn } from './rules.mjs';
 import { rulesCheckDue, rulesNotice, teamRuleUses } from './team-rules.mjs';
 import { shareCheckDue, takeNotices } from './share.mjs';
+import { keepUnsaid, pruneUnsaid, showsMessages, takeUnsaid, unsaidContext } from './unsaid.mjs';
 import { currentHead, repositoryRoot } from './git.mjs';
 
 export const HOOK_EVENTS = ['session-start', 'prompt', 'stop', 'stop-failure', 'tool', 'session-end'];
@@ -96,6 +99,7 @@ export async function runHook(agent, name, { snapshot = agent !== 'codex', event
         } else if (name === 'prompt') prompt(context);
         else if (name === 'stop') stop(context);
         else if (name === 'stop-failure') stopFailure(context);
+        else if (name === 'tool' && agent === 'cursor') cursorTool(context);
         else if (name === 'tool') syncIfDue(context.site, context.id, { path: event.transcript_path, agent, args: context.agentArgs });
         else if (name === 'session-end') await sessionEnd(context);
     } catch {
@@ -113,12 +117,6 @@ export function takeSnapshotOf(event, kind) {
         // No git, odd input, an unreadable home folder: the session goes on as it would without the plugin.
     }
 }
-
-/**
- * The Cursor hooks have a channel for what the person should see only in a turn (a followup that costs a model turn):
- * what the start has to say is left unsaid there, and the checks it would have made go on in the background.
- */
-const SAYS = (agent) => agent !== 'cursor';
 
 /** HEAD at the start of a session (Codex's own session file says it), written once: resume and compaction keep the id. */
 function rememberStart(event, agent) {
@@ -143,7 +141,10 @@ function sessionStart({ event, agent, site, id, agentArgs }, emit = true) {
     // One systemMessage for everything the start has to say: the agents take one JSON object from a hook.
     const messages = [teamRulesAtStart({ event, agent, site, agentArgs }), rules?.line, ...shareAtStart({ event, site, agentArgs })].filter(Boolean);
     const out = {};
-    if (messages.length && SAYS(agent)) out.systemMessage = messages.join('\n');
+    // Where a systemMessage is not shown (lib/unsaid.mjs), the lines wait for the model to say them at the next prompt.
+    if (messages.length && showsMessages(agent, event, sessionFile(event, agent, id))) out.systemMessage = messages.join('\n');
+    else keepUnsaid(agent, id, messages);
+    pruneUnsaid();
     // The rules go to the agent: Claude Code, Codex and Pi take additionalContext, Cursor its additional_context.
     if (rules?.context) {
         if (agent === 'cursor') out.additional_context = rules.context;
@@ -152,6 +153,9 @@ function sessionStart({ event, agent, site, id, agentArgs }, emit = true) {
     if (agent === 'cursor' && id && SESSION_ID.test(id)) {
         out.additional_context = [out.additional_context, `KeepPlain current session: client=cursor_plugin session_id=${id}. Use this exact id if attaching this conversation to a previous task; detect the repository again at query time.`].filter(Boolean).join('\n');
     }
+    // Cursor's prompt hook takes no context: what it has to say goes into this start's, when the start is answered.
+    const unsaid = agent === 'cursor' && emit ? unsaidContext(takeUnsaid(agent, id)) : '';
+    if (unsaid) out.additional_context = [unsaid, out.additional_context].filter(Boolean).join('\n\n');
     if (emit && Object.keys(out).length) console.log(JSON.stringify(out));
 
     if (!id) return;
@@ -226,7 +230,14 @@ const signedIn = (site) => process.env.KEEPPLAIN_TOKEN || process.env.CLAUDE_PLU
 function prompt({ event, agent, site, id, agentArgs }) {
     if (agent !== 'cursor') {
         const rules = rulesAtPrompt({ event, site, id });
-        if (rules) console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: rules } }));
+        // What an earlier hook could not show the person (lib/unsaid.mjs): the model says it. Pi keeps the rules in the
+        // system prompt of every run, so its lines come apart, for this run only.
+        const unsaid = unsaidContext(takeUnsaid(agent, id));
+        const context = agent === 'pi' ? rules : [unsaid, rules].filter(Boolean).join('\n\n');
+        const out = {};
+        if (context) out.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: context };
+        if (agent === 'pi' && unsaid) out.unsaidContext = unsaid;
+        if (Object.keys(out).length) console.log(JSON.stringify(out));
         return;
     }
     const first = id && !readCursorSidecar(id)?.prompts?.length;
@@ -243,21 +254,41 @@ function stop({ event, agent, site, id, agentArgs }) {
     const messages = [];
     if (id && mode) {
         syncIfDue(site, id, { path: event.transcript_path, agent, args: agentArgs });
-    } else if (id && nudgeOn() && SAYS(agent)) {
-        const path = event.transcript_path || sessionPath(agent, id);
+    } else if (id && nudgeOn()) {
+        const path = sessionFile(event, agent, id);
         const builds = path ? nudgeDue({ agent, id, path }) : null;
         if (builds) messages.push(nudgeMessage(builds, commandIn(agent, 'build')));
     }
     // The limit of this agent is nearly used up (handoff plan, 47.3): once per crossing, the agents to go on in.
-    if (id && SAYS(agent) && handoffOn()) {
-        const path = event.transcript_path || sessionPath(agent, id);
-        const hit = nearLimit(readLimits(agent, path), handoffThreshold());
+    if (id && handoffOn()) {
+        const hit = nearLimit(readLimits(agent, sessionFile(event, agent, id)), handoffThreshold());
         if (hit && handoffDue(agent, id, hit)) {
             const message = handoffMessage(agent, hit, handoffTargets(agent));
             if (message) messages.push(message);
         }
     }
-    if (messages.length) console.log(JSON.stringify({ systemMessage: messages.join('\n') }));
+    if (!messages.length) return;
+    // Shown where the agent shows a systemMessage; elsewhere the model says it at the next prompt (lib/unsaid.mjs).
+    if (showsMessages(agent, event, sessionFile(event, agent, id))) console.log(JSON.stringify({ systemMessage: messages.join('\n') }));
+    else keepUnsaid(agent, id, messages);
+}
+
+/** The session's file: the one the event names, or the one found for its id; null when there is neither. */
+function sessionFile(event, agent, id) {
+    try {
+        return event.transcript_path || (id ? sessionPath(agent, id) : null) || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Cursor's postToolUse: the one hook in a Cursor turn that puts text into the model's context. What its Stop hook could
+ * not show the person goes there, once; otherwise nothing.
+ */
+function cursorTool({ agent, id }) {
+    const unsaid = unsaidContext(takeUnsaid(agent, id));
+    if (unsaid) console.log(JSON.stringify({ additional_context: unsaid }));
 }
 
 /**

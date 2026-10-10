@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { buildBrief, codexLimits, handoffDue, handoffMessage, handoffOn, handoffThreshold, nearLimit, setHandoff, startCommand, windowLabel } from '../scripts/lib/handoff.mjs';
-import { hookCommand } from './helpers.mjs';
+import { codexShowsMessages, keepUnsaid, showsMessages, takeUnsaid, unsaidContext } from '../scripts/lib/unsaid.mjs';
+import { coders, hookCommand } from './helpers.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/slim/', import.meta.url));
 const fresh = () => mkdtempSync(join(tmpdir(), 'ct-handoff-'));
@@ -175,4 +176,74 @@ test('the Stop hook of Codex says once where to go on when a limit is past the t
     const other = JSON.stringify({ ...JSON.parse(event), session_id: 'thread-2' });
     assert.equal(spawnSync(program, programArgs, { input: other, env, encoding: 'utf8' }).stdout.trim(), '');
     assert.equal(JSON.parse(readFileSync(join(home, 'handoffs', 'codex-thread-1.json'), 'utf8')).said.length, 1);
+});
+
+test('the Codex app does not show a Stop hook\'s line: the model says it at the next prompt, once', () => {
+    const dir = fresh();
+    const home = join(dir, 'kp');
+    const rollout = join(dir, 'rollout.jsonl');
+    writeFileSync(rollout, [JSON.stringify({ type: 'session_meta', payload: { id: 'thread-app', cwd: dir, originator: 'Codex Desktop' } }), tokenCount(95, 4)].join('\n'));
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, process.platform === 'win32' ? 'claude.cmd' : 'claude'), '', { mode: 0o755 });
+    const env = { ...process.env, KEEPPLAIN_HOME: home, PATH: bin, Path: bin, CLAUDE_CONFIG_DIR: join(dir, 'no-claude'), CODEX_HOME: join(dir, 'no-codex'), KEEPPLAIN_NUDGE: '0' };
+    const event = (name) => JSON.stringify({ hook_event_name: name, session_id: 'thread-app', transcript_path: rollout, cwd: dir });
+    const [program, programArgs] = coders(['hook', 'codex', 'stop']);
+    const stop = spawnSync(program, programArgs, { input: event('Stop'), env, encoding: 'utf8' });
+    assert.equal(stop.status, 0, stop.stderr);
+    assert.equal(stop.stdout.trim(), '', 'no systemMessage the app would drop');
+
+    const [p, pArgs] = coders(['hook', 'codex', 'prompt']);
+    const prompt = spawnSync(p, pArgs, { input: event('UserPromptSubmit'), env, encoding: 'utf8' });
+    const context = JSON.parse(prompt.stdout.trim()).hookSpecificOutput.additionalContext;
+    assert.match(context, /Begin your next reply with it/);
+    assert.match(context, /> KeepPlain: Codex's 5-hour limit is 95% used .+\$keepplain:handoff claude-code/);
+    assert.equal(spawnSync(p, pArgs, { input: event('UserPromptSubmit'), env, encoding: 'utf8' }).stdout.trim(), '', 'said once');
+});
+
+test('who shows a systemMessage, and the lines kept for the others', () => {
+    const dir = fresh();
+    const file = (originator) => {
+        const path = join(dir, `${originator ?? 'none'}.jsonl`.replace(/\s/g, '_'));
+        writeFileSync(path, `${JSON.stringify({ type: 'session_meta', payload: originator ? { originator } : {} })}\n`);
+        return path;
+    };
+    assert.equal(codexShowsMessages(file('codex_cli_rs')), true);
+    assert.equal(codexShowsMessages(file('codex-tui')), true);
+    assert.equal(codexShowsMessages(file(null)), true, 'a rollout that does not say: as before');
+    assert.equal(codexShowsMessages(file('Codex Desktop')), false);
+    assert.equal(codexShowsMessages(file('codex_vscode')), false);
+    assert.equal(showsMessages('claude-code', {}), true);
+    assert.equal(showsMessages('cursor', {}), false);
+    assert.equal(showsMessages('pi', {}), true);
+    assert.equal(showsMessages('pi', { shows_messages: false }), false);
+
+    keepUnsaid('cursor', 'c1', ['one', 'two'], dir);
+    keepUnsaid('cursor', 'c1', ['two', 'three'], dir);
+    assert.deepEqual(takeUnsaid('cursor', 'c1', dir), ['one', 'two', 'three']);
+    assert.deepEqual(takeUnsaid('cursor', 'c1', dir), []);
+    assert.equal(unsaidContext([]), '');
+});
+
+test('Cursor says the kept lines through postToolUse, Pi for one run of its prompt', () => {
+    const dir = fresh();
+    const home = join(dir, 'kp');
+    const env = { ...process.env, KEEPPLAIN_HOME: home };
+    const run = (agent, name, event) => {
+        const [program, args] = coders(['hook', agent, name]);
+        const r = spawnSync(program, args, { input: JSON.stringify(event), env, encoding: 'utf8' });
+        assert.equal(r.status, 0, r.stderr);
+        return r.stdout.trim();
+    };
+    const id = '3afce6f6-b0c9-4da6-a2c8-467f0e2f9a11';
+    assert.equal(run('cursor', 'tool', { conversation_id: id }), '', 'nothing kept: nothing said');
+    keepUnsaid('cursor', id, ['KeepPlain: a line'], home);
+    assert.match(JSON.parse(run('cursor', 'tool', { conversation_id: id })).additional_context, /> KeepPlain: a line/);
+    assert.equal(run('cursor', 'tool', { conversation_id: id }), '');
+
+    const pi = '01a0ed05-ee3a-74a4-8c57-1e6429fcfed2';
+    keepUnsaid('pi', pi, ['KeepPlain: for Pi'], home);
+    const out = JSON.parse(run('pi', 'prompt', { session_id: pi, cwd: dir, prompt: 'hi' }));
+    assert.match(out.unsaidContext, /> KeepPlain: for Pi/);
+    assert.equal(out.hookSpecificOutput, undefined, 'not among the rules Pi keeps in every run');
 });

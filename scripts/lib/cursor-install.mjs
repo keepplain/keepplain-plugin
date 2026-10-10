@@ -4,7 +4,7 @@
  * documentation and its releases disagree about; the user-level files are read by the IDE and the CLI alike, at every
  * start, and need nothing switched on:
  *
- *   ~/.cursor/hooks.json          the four hooks, next to whatever else is there: `<program> hook cursor <event>`
+ *   ~/.cursor/hooks.json          the five hooks, next to whatever else is there: `<program> hook cursor <event>`
  *   ~/.cursor/skills/keepplain-<name>/SKILL.md   /keepplain-build, -auto, -login, -logout, -use, -share, -rules and the library's lookup
  *   ~/.cursor/mcp.json            the library, as a remote server (Cursor signs in to it through the browser: OAuth)
  *
@@ -19,13 +19,13 @@ import { cursorHome } from './cursor.mjs';
 export const SKILLS = ['build', 'auto', 'login', 'logout', 'lookup', 'resume', 'use', 'share', 'rules', 'handoff'];
 
 /** Cursor's event names and what each runs. */
-export const HOOK_EVENTS = { sessionStart: 'session-start', beforeSubmitPrompt: 'prompt', stop: 'stop', sessionEnd: 'session-end' };
+export const HOOK_EVENTS = { sessionStart: 'session-start', beforeSubmitPrompt: 'prompt', postToolUse: 'tool', stop: 'stop', sessionEnd: 'session-end' };
 
 const paths = (env = process.env) => ({ hooks: join(cursorHome(env), 'hooks.json'), mcp: join(cursorHome(env), 'mcp.json'), skills: join(cursorHome(env), 'skills') });
 const skillFolder = (name) => `keepplain-${name}`;
 
 /** Whether a hook entry is ours: it runs `… hook cursor <event>` of a program named keepplain. */
-export const isOurs = (entry) => typeof entry?.command === 'string' && /keepplain/i.test(entry.command) && /\shook cursor (?:session-start|prompt|stop|session-end)\s*$/.test(entry.command);
+export const isOurs = (entry) => typeof entry?.command === 'string' && /keepplain/i.test(entry.command) && /\shook cursor (?:session-start|prompt|tool|stop|session-end)\s*$/.test(entry.command);
 
 /** A JSON file: {data} when it is one (or is not there yet: {}), {unreadable: true} when it is something else. */
 function readJson(path) {

@@ -82,10 +82,10 @@ test('enable installs the package into Pi with pi install, and the hooks, skills
     assert.ok(extension.includes(`const PROGRAM = ${JSON.stringify([program, ...fixed])};`), 'the program is written into the extension');
     assert.ok(extension.includes('const program = () => PROGRAM;'), 'and it has no other way to start it');
 
-    // Cursor: four hooks that run the program, seven skills, the library as a remote server.
+    // Cursor: five hooks that run the program, seven skills, the library as a remote server.
     const hooks = json(join(cursor(), 'hooks.json'));
     assert.equal(hooks.version, 1);
-    assert.deepEqual(Object.keys(hooks.hooks).sort(), ['beforeSubmitPrompt', 'sessionEnd', 'sessionStart', 'stop']);
+    assert.deepEqual(Object.keys(hooks.hooks).sort(), ['beforeSubmitPrompt', 'postToolUse', 'sessionEnd', 'sessionStart', 'stop']);
     assert.match(hooks.hooks.stop[0].command, / hook cursor stop$/);
     assert.match(hooks.hooks.beforeSubmitPrompt[0].command, / hook cursor prompt$/);
     assert.ok(hooks.hooks.sessionStart[0].command.includes(process.platform === 'win32' ? `& '${program}'` : `'${program}'`), 'the program, quoted for Cursor\'s shell');
@@ -109,7 +109,7 @@ test('enable installs the package into Pi with pi install, and the hooks, skills
     assert.match(again.out, /- Cursor: update the hooks/);
     assert.deepEqual(calls(), [], 'a local package is loaded where it is laid out: nothing to run');
     const hooksAgain = json(join(cursor(), 'hooks.json'));
-    assert.deepEqual(Object.values(hooksAgain.hooks).map((list) => list.length), [1, 1, 1, 1]);
+    assert.deepEqual(Object.values(hooksAgain.hooks).map((list) => list.length), [1, 1, 1, 1, 1]);
     assert.equal(json(join(dir, 'ct', 'enable.json')).cursor.mcp, 'added');
 });
 

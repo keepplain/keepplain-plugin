@@ -249,6 +249,16 @@ export function hookContext(out) {
     }
 }
 
+/** What a prompt hook handed over for this run only (unsaidContext: lines the person was not shown), or ''. */
+export function unsaidContext(out) {
+    try {
+        const context = JSON.parse(out || '{}').unsaidContext;
+        return typeof context === 'string' ? context : '';
+    } catch {
+        return '';
+    }
+}
+
 /** The system prompt with the rules after it, once. */
 export function withRules(systemPrompt, rules) {
     if (!rules || typeof systemPrompt !== 'string' || systemPrompt.includes(rules)) return undefined;
@@ -349,7 +359,7 @@ export default function (pi) {
     let rules = '';
     pi.on('session_start', async (event, ctx) => {
         if (event.reason === 'reload') return;
-        const out = await hook('session-start', ctx);
+        const out = await hook('session-start', ctx, 15_000, { shows_messages: Boolean(ctx.hasUI) });
         showMessage(out, ctx);
         rules = hookContext(out);
         taskRules = [];
@@ -358,13 +368,16 @@ export default function (pi) {
     // prompt of every run, as a CLAUDE.md would be.
     let taskRules = [];
     pi.on('before_agent_start', async (event, ctx) => {
-        const extra = hookContext(await hook('prompt', ctx, 15_000, typeof event?.prompt === 'string' ? { prompt: event.prompt } : {}));
+        const out = await hook('prompt', ctx, 15_000, typeof event?.prompt === 'string' ? { prompt: event.prompt } : {});
+        const extra = hookContext(out);
         if (extra) taskRules = [...taskRules, extra];
-        const systemPrompt = [rules, ...taskRules].reduce((prompt, text) => withRules(prompt, text) ?? prompt, event?.systemPrompt);
+        // What a hook could not show the person (no UI here): for this run only, the model says it.
+        const once = unsaidContext(out);
+        const systemPrompt = [rules, ...taskRules, once].reduce((prompt, text) => withRules(prompt, text) ?? prompt, event?.systemPrompt);
         return typeof systemPrompt === 'string' && systemPrompt !== event?.systemPrompt ? { systemPrompt } : undefined;
     });
     pi.on('agent_settled', async (event, ctx) => {
-        showMessage(await hook('stop', ctx), ctx);
+        showMessage(await hook('stop', ctx, 15_000, { shows_messages: Boolean(ctx.hasUI) }), ctx);
     });
     pi.on('session_shutdown', async (event, ctx) => {
         // A reload keeps the session; the others end the one that was open.
