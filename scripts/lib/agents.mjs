@@ -46,6 +46,32 @@ function cursorAgentCli(env) {
 }
 
 /**
+ * Claude Code the Claude desktop app runs for its sessions, when `claude` is not in PATH: the newest of
+ * claude-code/<version>/<build>/claude.exe (Windows), or claude.app's binary in the same folder (macOS). Null when there is none.
+ */
+function desktopClaudeCli(env) {
+    const root = join(claudeAppData(env), 'claude-code');
+    const dirs = (path) => {
+        try {
+            return readdirSync(path, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+        } catch {
+            return [];
+        }
+    };
+    const versions = dirs(root).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    const binary = process.platform === 'win32' ? 'claude.exe' : 'claude';
+    for (const version of versions) {
+        for (const build of dirs(join(root, version))) {
+            for (const candidate of [join(root, version, build, binary), join(root, version, build, 'claude.app', 'Contents', 'MacOS', 'claude')]) {
+                if (existsSync(candidate)) return candidate;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
  * Every agent: {id, name, cli (a path or null), home, present}; native: the plugin goes in as files of the agent's own
  * folder (Cursor), so it needs no command of the agent's to install.
  */
@@ -53,7 +79,7 @@ export function detectAgents(env = process.env) {
     const exe = process.platform === 'win32' ? '.exe' : '';
     const desktopCodex = join(codexHome(env), 'plugins', '.plugin-appserver', `codex${exe}`);
     const claudeHome = configDir(env);
-    const claudeCli = findProgram('claude', env);
+    const claudeCli = findProgram('claude', env) ?? desktopClaudeCli(env);
     const codexCli = findProgram('codex', env) ?? (existsSync(desktopCodex) ? desktopCodex : null);
     const cursorCli = findProgram('cursor-agent', env) ?? cursorAgentCli(env);
     const piCli = findProgram('pi', env);
