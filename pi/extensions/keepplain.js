@@ -269,7 +269,7 @@ export function withRules(systemPrompt, rules) {
 const LIBRARY = [
     {
         name: 'search_my_work', label: 'KeepPlain: find my task',
-        description: 'Find your previous work to recall or continue it across Claude Code, Codex, Cursor and Pi. Detects the current repository at request time. Offer multiple matches newest first. Only use scope all for an explicitly broader search.',
+        description: 'Find your previous work to recall or continue it across Claude Code, Codex, Cursor and Pi, and where in its sessions the words are. Detects the current repository at request time. Offer multiple matches in the returned order, best match first. A matched session\'s excerpt gives the passage; its cursor and text_offset go to get_session_excerpt. Only use scope all for an explicitly broader search.',
         snippet: 'search_my_work: recall or continue your own previous task', guidelines: ['Use this before asking the user to explain previous work. Choose between multiple results with the user.'],
         parameters: () => ({ query: Type.String(), scope: Type.Optional(Type.String({ enum: ['project', 'all'] })), cursor: Type.Optional(Type.String()) }),
     },
@@ -278,7 +278,7 @@ const LIBRARY = [
         snippet: 'get_task_context: read previous task context', guidelines: [], parameters: () => ({task_id: Type.String(), max_chars: Type.Optional(Type.Integer()), cursor: Type.Optional(Type.String())}),
     },
     {
-        name: 'get_session_excerpt', label: 'KeepPlain: more context', description: 'Read more source messages when task context is incomplete.',
+        name: 'get_session_excerpt', label: 'KeepPlain: more context', description: 'Read more source messages when task context is incomplete, or read on from a search_my_work excerpt at its cursor and text_offset.',
         snippet: 'get_session_excerpt: read additional source messages', guidelines: [], parameters: () => ({session_id: Type.String(), cursor: Type.Optional(Type.Integer()), limit: Type.Optional(Type.Integer()), text_offset: Type.Optional(Type.Integer())}),
     },
     {
