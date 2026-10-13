@@ -36,6 +36,14 @@ test('the commits made since HEAD at the start of the session', () => {
     });
 });
 
+test('a session in a folder of the repository says where the folder is, one at the root says nothing', () => {
+    const { dir } = makeRepo();
+    mkdirSync(join(dir, 'backend', 'app'), { recursive: true });
+
+    assert.equal(gitContext(join(dir, 'backend', 'app'), null, null).prefix, 'backend/app/');
+    assert.equal('prefix' in gitContext(dir, null, null), false);
+});
+
 test('a long session sends 20 titles and up to 50 hashes, the first ones in the order of the titles', () => {
     const { dir, hashes } = makeRepo();
     for (let i = 1; i <= 30; i++) {

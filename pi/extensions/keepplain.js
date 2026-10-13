@@ -269,9 +269,9 @@ export function withRules(systemPrompt, rules) {
 const LIBRARY = [
     {
         name: 'search_my_work', label: 'KeepPlain: find my task',
-        description: 'Find your previous work to recall or continue it across Claude Code, Codex, Cursor and Pi, and where in its sessions the words are. Detects the current repository at request time. Offer multiple matches in the returned order, best match first. A matched session\'s excerpt gives the passage; its cursor and text_offset go to get_session_excerpt. Only use scope all for an explicitly broader search.',
+        description: 'Find your previous work to recall or continue it across Claude Code, Codex, Cursor and Pi, and where in its sessions the words are. Detects the current repository at request time. Offer multiple matches in the returned order, best match first. A matched session\'s excerpt gives the passage; its cursor and text_offset go to get_session_excerpt. Why a file or commit changed: pass paths, or commit with agent_sessions (its Agent-Session trailer values); change gives the turn and the request before it. Only use scope all for an explicitly broader search.',
         snippet: 'search_my_work: recall or continue your own previous task', guidelines: ['Use this before asking the user to explain previous work. Choose between multiple results with the user.'],
-        parameters: () => ({ query: Type.String(), scope: Type.Optional(Type.String({ enum: ['project', 'all'] })), cursor: Type.Optional(Type.String()) }),
+        parameters: () => ({ query: Type.String(), scope: Type.Optional(Type.String({ enum: ['project', 'all'] })), cursor: Type.Optional(Type.String()), paths: Type.Optional(Type.Array(Type.String())), commit: Type.Optional(Type.String()), agent_sessions: Type.Optional(Type.Array(Type.String())) }),
     },
     {
         name: 'get_task_context', label: 'KeepPlain: task context', description: 'Read source excerpts for the selected private task without a summary API call. Verify the current checkout before acting.',

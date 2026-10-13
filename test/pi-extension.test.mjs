@@ -26,7 +26,7 @@ before(async () => {
     mkdirSync(join(dir, 'node_modules', 'typebox'), { recursive: true });
     writeFileSync(join(dir, 'node_modules', 'typebox', 'package.json'), JSON.stringify({ name: 'typebox', type: 'module', exports: './index.js' }));
     writeFileSync(join(dir, 'node_modules', 'typebox', 'index.js'), `const t = (type) => (options = {}) => ({ type, ...options });
-export const Type = { String: t('string'), Integer: t('integer'), Optional: (schema) => ({ ...schema, optional: true }), Object: (properties) => ({ type: 'object', properties }) };
+export const Type = { String: t('string'), Integer: t('integer'), Optional: (schema) => ({ ...schema, optional: true }), Array: (items, options = {}) => ({ type: 'array', items, ...options }), Object: (properties) => ({ type: 'object', properties }) };
 `);
     // The program: logs its call, answers with what the scenario says for it.
     writeFileSync(cli, `import { appendFileSync } from 'node:fs';

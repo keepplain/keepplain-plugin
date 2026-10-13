@@ -168,6 +168,10 @@ export function gitContext(cwd, headStart, startedAt) {
         shortstat: null,
     };
     if (estimated) context.head_start_estimated = true;
+    // Where the folder sits in its repository ("backend/"): the session's changed paths are the folder's, and the site
+    // finds them by the path git names from the root. Not sent at the root, so a send from there is as before.
+    const prefix = git(cwd, ['rev-parse', '--show-prefix']);
+    if (prefix) context.prefix = prefix;
 
     if (headStart && headStart !== headEnd) {
         const range = `${headStart}..${headEnd}`;
