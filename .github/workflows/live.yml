@@ -21,7 +21,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        agent: [claude, codex, pi, cursor]
+        # Cursor is left out until there is a CURSOR_API_KEY: the Free plan's dashboard has no user API keys, and CI has
+        # no browser to sign in with. live/cursor.live.mjs is ready: add cursor here and the secret.
+        agent: [claude, codex, pi]
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
