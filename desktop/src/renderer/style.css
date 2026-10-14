@@ -330,6 +330,64 @@ code {
     padding: 18px 20px;
     margin-bottom: 14px;
 }
+/* The welcome's tick for the import of past sessions. */
+.past-choice {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    cursor: pointer;
+}
+.past-choice input {
+    margin-top: 3px;
+    accent-color: var(--accent);
+}
+.past-choice .title,
+.share-team .title {
+    display: block;
+    font-size: inherit;
+    font-weight: 600;
+    margin: 0 0 2px;
+}
+.past-choice .muted {
+    display: block;
+}
+/* After the import is set up: which sessions of a team's repositories go to the team. */
+.share-list {
+    list-style: none;
+    margin: 8px 0 14px;
+    padding: 0;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+}
+.share-list li + li {
+    border-top: 1px solid var(--line);
+}
+.share-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    cursor: pointer;
+}
+.share-row.all {
+    padding: 12px 10px 0;
+}
+.share-row input {
+    margin-top: 3px;
+    accent-color: var(--accent);
+}
+.share-row .grow {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.share-row .clip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .card-head {
     display: flex;
     align-items: baseline;

@@ -1,7 +1,7 @@
 /**
  * Finding and reading the current Claude Code or Codex session. Pure helpers, no network: keepplain.mjs does the talking.
  */
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { piIdOf } from './pi.mjs';
@@ -101,6 +101,70 @@ export function findRollout(threadId, dir = codexHome()) {
     walk(join(dir, 'archived_sessions'), 0);
 
     return found.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null;
+}
+
+/** The rollout file whose own id is $fileId: the thread's first file (rollout-…-<id>.jsonl) or a page (…-<thread>_<id>.jsonl). */
+function rolloutFile(fileId, dir) {
+    if (!SESSION_ID.test(fileId ?? '')) return null;
+    const name = new RegExp(`^rollout-.+-(?:${fileId}|[0-9a-f-]{36}_${fileId})\\.jsonl$`);
+    const found = [];
+    const walk = (folder, depth) => {
+        let entries;
+        try {
+            entries = readdirSync(folder, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const entry of entries) {
+            const path = join(folder, entry.name);
+            if (entry.isDirectory() && depth > 0) walk(path, depth - 1);
+            else if (entry.isFile() && name.test(entry.name)) found.push(path);
+        }
+    };
+    walk(join(dir, 'sessions'), 3);
+    walk(join(dir, 'archived_sessions'), 0);
+
+    return found[0] ?? null;
+}
+
+/** The session_meta payload of a rollout, from its first line; null when it has none. */
+export function rolloutMeta(path) {
+    // Its instructions make the first line long: read up to the first line break, a megabyte at most.
+    const buffer = Buffer.alloc(1024 * 1024);
+    let fd;
+    try {
+        fd = openSync(path, 'r');
+        const text = buffer.toString('utf8', 0, readSync(fd, buffer, 0, buffer.length, 0));
+        const first = JSON.parse(text.slice(0, text.indexOf('\n') >= 0 ? text.indexOf('\n') : undefined));
+
+        return first?.type === 'session_meta' && first.payload && typeof first.payload === 'object' ? first.payload : null;
+    } catch {
+        return null;
+    } finally {
+        if (fd !== undefined) closeSync(fd);
+    }
+}
+
+/**
+ * A Codex thread as files, oldest first: [{path, until}]. Codex 0.160 keeps a long thread in pages: a file whose
+ * session_meta has history_base ({thread_id, end_ordinal_exclusive}) goes on from the file with that id, whose lines
+ * from that ordinal on are not the thread's any more (it went another way there), and that file may be a page itself.
+ * until: the ordinal a file is read up to (exclusive); null for the newest, read whole. A rollout of an older Codex, or
+ * a page that starts a history of its own, is [{path, until: null}].
+ */
+export function rolloutFiles(path, dir = codexHome()) {
+    const files = [{ path, until: null }];
+    const seen = new Set([path]);
+    for (let current = path; files.length < 50; ) {
+        const base = rolloutMeta(current)?.history_base;
+        const previous = base?.thread_id ? rolloutFile(base.thread_id, dir) : null;
+        if (!previous || seen.has(previous)) break;
+        seen.add(previous);
+        files.unshift({ path: previous, until: Number.isInteger(base.end_ordinal_exclusive) ? base.end_ordinal_exclusive : null });
+        current = previous;
+    }
+
+    return files;
 }
 
 /**
@@ -207,6 +271,8 @@ function textOf(content) {
 export function summarize(text, cwd = null) {
     let prompts = 0;
     let toolCalls = 0;
+    // Lines of the agent's: a session with prompts and none of these never got an answer (it was stopped at once).
+    let answers = 0;
     let first = null;
     let last = null;
 
@@ -230,11 +296,13 @@ export function summarize(text, cwd = null) {
         const content = d.message?.content;
         if (d.type === 'user' && !d.isMeta && isPrompt(content)) prompts++;
         if (d.type === 'assistant' && Array.isArray(content)) toolCalls += content.filter((b) => b?.type === 'tool_use').length;
+        if (d.type === 'assistant') answers++;
 
         // Codex: {type: 'response_item', payload: {type: 'message' | 'function_call' | …}}
         const p = d.type === 'response_item' ? d.payload : null;
         if (p?.type === 'message' && p.role === 'user' && isCodexPrompt(p.content)) prompts++;
         if (CODEX_CALLS.has(p?.type)) toolCalls++;
+        if ((p?.type === 'message' && p.role === 'assistant') || CODEX_CALLS.has(p?.type)) answers++;
     }
 
     return {
@@ -242,6 +310,7 @@ export function summarize(text, cwd = null) {
         project: cwd ? basename(cwd.replace(/[\\/]+$/, '')) : null,
         prompts,
         toolCalls,
+        answers,
         startedAt: first,
         durationSec: first !== null && last !== null ? Math.round((last - first) / 1000) : null,
     };

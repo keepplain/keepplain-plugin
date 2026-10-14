@@ -10,6 +10,10 @@ if (!process.env.CT_TEST_ISOLATED) {
     const dir = mkdtempSync(join(tmpdir(), 'ct-agents-'));
     process.env.CT_TEST_ISOLATED = dir;
     process.env.CURSOR_CONFIG_DIR ||= join(dir, 'cursor');
+    // Cursor's own User folder, whose workspaces the import of past sessions reads (lib/past.mjs).
+    process.env.KEEPPLAIN_CURSOR_USER_DIR ||= join(dir, 'cursor-user');
+    // The Claude app's own records of its conversations (lib/continuation.mjs), read by the import of past sessions.
+    process.env.KEEPPLAIN_CLAUDE_APP_DIR ||= join(dir, 'claude-app');
     process.env.PI_CODING_AGENT_DIR ||= join(dir, 'pi');
     process.env.PI_CODING_AGENT_SESSION_DIR ||= join(dir, 'pi-sessions');
     delete process.env.PI_SESSION_ID;
