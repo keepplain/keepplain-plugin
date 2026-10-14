@@ -1776,9 +1776,13 @@ function describeGit(git) {
 /** Commit titles and the branch name go as they are written: a token pasted into one is redacted like the session. */
 function checkedGit(git, privacy) {
     if (!git) return git;
+    // The session's folder in its repository ("clients/acme/api/") names it as much as its cwd does: one that holds a
+    // word of the person's list does not go (the site keeps the session's paths from its folder then).
+    const prefix = git.prefix && privacy.text(git.prefix) === git.prefix ? git.prefix : undefined;
 
     return {
         ...git,
+        prefix,
         branch: git.branch ? privacy.text(git.branch) : git.branch,
         commits: { ...git.commits, subjects: (git.commits?.subjects ?? []).map((s) => privacy.text(s)) },
     };
