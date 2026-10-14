@@ -16,7 +16,7 @@ import { coders, makeRepo, waitFor } from './helpers.mjs';
 const run = promisify(execFile);
 const TOKEN = 'ct_' + 'g'.repeat(48);
 // One session per test: a session's snapshots belong to the repository it started in.
-const ids = { commit: 'a1b2c3d4-0000-4000-8000-0000000000d1', push: 'a1b2c3d4-0000-4000-8000-0000000000d2' };
+const ids = { commit: 'a1b2c3d4-0000-4000-8000-0000000000d1', push: 'a1b2c3d4-0000-4000-8000-0000000000d2', beside: 'a1b2c3d4-0000-4000-8000-0000000000d3' };
 const home = mkdtempSync(join(tmpdir(), 'ct-hooks-'));
 const program = [coders([])[0], ...coders([])[1]];
 // Snapshots slower than their budget turn themselves off; a slow CI runner must not do that here.
@@ -50,7 +50,8 @@ before(async () => {
     for (const id of Object.values(ids)) copyFileSync(fileURLToPath(new URL('./fixtures/slim/claude-code.jsonl', import.meta.url)), join(home, 'claude', 'projects', 'C--code-shop', `${id}.jsonl`));
     mkdirSync(join(home, 'codex'));
     env = { ...process.env, KEEPPLAIN_HOME: join(home, 'ct'), CLAUDE_CONFIG_DIR: join(home, 'claude'), CODEX_HOME: join(home, 'codex'), KEEPPLAIN_URL: site, KEEPPLAIN_NO_UPDATE_CHECK: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
-    for (const name of ['KEEPPLAIN_TOKEN', 'KEEPPLAIN_AUTO', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[name];
+    // The agent these tests may run in puts its session's id in their environment: a commit here is not its.
+    for (const name of ['CLAUDE_CODE_SESSION_ID', 'CLAUDE_SESSION_ID', 'CODEX_THREAD_ID', 'PI_SESSION_ID', 'KEEPPLAIN_TOKEN', 'KEEPPLAIN_AUTO', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[name];
 });
 after(() => server.close());
 
@@ -116,6 +117,23 @@ test('a commit with the session\'s work gets the trailer; others, merges and rep
     // Amended: still one trailer.
     git(repo.dir, 'commit', '-q', '--amend', '--no-edit');
     assert.equal(message(repo.dir).split('Agent-Session').length, 2);
+});
+
+test("an agent's commit names its own session, not another that worked in the same folder", () => {
+    // Another session's snapshots saw app.txt change: in a shared folder they see every session's edits.
+    const repo = repoWithSession(ids.beside);
+    installHooks(hooksOf(repo.dir), program);
+    git(repo.dir, 'add', 'app.txt');
+    const dir = join(home, 'ct', 'snapshots');
+    // From the person's own terminal, the snapshots name the session they saw change the file.
+    assert.deepEqual(sessionsBehindCommit(repo.dir, { dir, env }), [ids.beside]);
+    // The agent that commits puts its session's id in the command's environment, and git runs the hook inside it.
+    const agent = 'a1b2c3d4-0000-4000-8000-0000000000e1';
+    for (const name of ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'PI_SESSION_ID']) {
+        assert.deepEqual(sessionsBehindCommit(repo.dir, { dir, env: { ...env, [name]: agent } }), [agent], name);
+    }
+    execFileSync('git', ['-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Limiter by email'], { cwd: repo.dir, env: { ...env, CLAUDE_CODE_SESSION_ID: agent }, stdio: 'ignore' });
+    assert.equal(message(repo.dir), `Limiter by email\n\nAgent-Session: ${agent}`);
 });
 
 test('a push finds the sessions behind it: a line without auto mode, a send in push mode, and never a failed push', async () => {

@@ -109,9 +109,16 @@ test('the git lines go where they happened in the session', () => {
     assert.deepEqual(out.map((d) => d.type === 'git-changes' ? `git:${d.by}` : d.message.content), ['Fix it.', 'Done.', 'git:agent', 'git:human', 'Now the tests.', 'Added.', 'git:agent']);
 });
 
-test('a slow repository turns snapshots off, and a folder outside git takes none', () => {
+test('a slow repository turns snapshots off, a moment\'s slowness does not, and a folder outside git takes none', () => {
     const { dir, store } = setup();
-    assert.ok(takeSnapshot({ session_id: ID, cwd: dir }, 'start', { dir: store, budgetMs: 0 }));
+    const take = (kind, budgetMs) => takeSnapshot({ session_id: ID, cwd: dir }, kind, { dir: store, budgetMs });
+    // The machine busy for a moment (a test run, a build): the next quick snapshot starts the count again.
+    assert.ok(take('start', 0));
+    assert.ok(take('prompt', 0));
+    assert.ok(take('stop', 60_000));
+    assert.equal(readSnapshots(ID, store).disabled, undefined);
+    // Three slow ones in a row: the repository is slow, and the person should not wait on every prompt.
+    for (const kind of ['prompt', 'stop', 'prompt']) assert.ok(take(kind, 0));
     assert.equal(readSnapshots(ID, store).disabled, 'slow');
     assert.equal(takeSnapshot({ session_id: ID, cwd: dir }, 'prompt', { dir: store }), null);
 

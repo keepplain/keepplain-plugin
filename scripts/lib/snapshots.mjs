@@ -18,8 +18,13 @@ import { privateDir, writePrivate } from './credentials.mjs';
 import { SESSION_ID } from './session.mjs';
 import { gitFileChange } from './slim.mjs';
 
-/** A snapshot slower than this turns snapshots off for the session: the person should not wait on every prompt. */
+/** A snapshot slower than this is a slow one; SLOW_IN_A_ROW of them turn snapshots off for the session. */
 export const BUDGET_MS = 3000;
+/**
+ * The person should not wait on every prompt, but one slow snapshot is the machine busy for a moment (a test run, a
+ * build), not the repository: off for good, the session's later work and commits would be nobody's.
+ */
+const SLOW_IN_A_ROW = 3;
 /** New files bigger than this are data, not code: left out of the snapshot. */
 export const MAX_NEW_FILE = 1_000_000;
 const MAX_NEW_FILES = 2000;
@@ -116,7 +121,9 @@ export function takeSnapshot(event, kind, { dir = snapshotDir(), now = Date.now(
     const entry = { kind, at: new Date(now).toISOString(), tree, head: git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { timeout: budgetMs }) };
     state.root = root;
     state.snapshots.push(entry);
-    if (Date.now() - began > budgetMs) state.disabled = 'slow';
+    if (Date.now() - began > budgetMs) state.slow = (state.slow ?? 0) + 1;
+    else delete state.slow;
+    if (state.slow >= SLOW_IN_A_ROW) state.disabled = 'slow';
     writeSnapshots(state, dir);
 
     return entry;

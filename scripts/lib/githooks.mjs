@@ -2,10 +2,12 @@
  * Git hooks of one repository (plan, stage 13.5): push as the edge of a piece of work. Put in by `keepplain enable`
  * (--git-hooks) in the repository it runs in, only when asked; never globally.
  *
- *   prepare-commit-msg  adds `Agent-Session: <id>` for the sessions behind the commit (stage 11.4): a Claude Code
- *                       session whose git snapshots (lib/snapshots.mjs) are newer than the last commit and whose
- *                       changes meet the index; a Codex session auto mode tracks in this repository, written to since
- *                       the last commit. Merges and squashes are left alone, a trailer already there is not repeated.
+ *   prepare-commit-msg  adds `Agent-Session: <id>` for the sessions behind the commit (stage 11.4). A commit an agent
+ *                       runs names its own session alone (committingSession). Any other, from a terminal, an IDE or
+ *                       Cursor: a Claude Code session whose git snapshots (lib/snapshots.mjs) are newer than the last
+ *                       commit and whose changes meet the index; a Codex session auto mode tracks in this repository,
+ *                       written to since the last commit. Merges and squashes are left alone, a trailer already there
+ *                       is not repeated.
  *                       --no-trailers leaves this hook out.
  *   pre-push            finds the sessions behind the commits going out (their trailers, and Claude Code snapshots
  *                       whose HEAD was one of them). With auto mode on, team or push they are sent in the background,
@@ -137,10 +139,25 @@ function addTrailers(root, [file, source]) {
     git(root, ['interpret-trailers', '--in-place', '--if-exists', 'addIfDifferent', ...ids.flatMap((id) => ['--trailer', `${TRAILER}: ${id}`]), resolve(root, file)]);
 }
 
+/**
+ * The agent session running this commit: Claude Code, Codex and Pi put their session's id in the environment of the
+ * commands they run, and git runs the hook inside that command. Null in the person's own terminal, an IDE, or Cursor,
+ * which tells its commands nothing.
+ */
+export function committingSession(env = process.env) {
+    const id = env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID || env.CODEX_THREAD_ID || env.PI_SESSION_ID;
+
+    return SESSION_ID.test(id ?? '') ? id : null;
+}
+
 /** The sessions whose work this commit holds. */
 export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.env } = {}) {
     const staged = new Set(lines(git(root, ['diff', '--cached', '--name-only', '-z']), '\0'));
     if (!staged.size) return [];
+    // An agent's commit is its session's alone. The snapshots cannot say whose a change is: a session working beside
+    // another in the same folder sees the other's edits in its own, and one of them may have stopped taking snapshots.
+    const committer = committingSession(env);
+    if (committer) return [committer];
     const since = Number(git(root, ['log', '-1', '--format=%ct'])) * 1000 || 0;
     // When a path was last committed: a change the agent made before that is in history already.
     const committed = new Map();
