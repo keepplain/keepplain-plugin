@@ -63,8 +63,17 @@
  *   keepplain enable | disable | status       connects Claude Code and Codex to this keepplain through their plugin
  *                                                 systems, takes that off again, says how things are (lib/enable.mjs)
  *     --yes  --agent=claude-code,codex  --auto=off|on|team|push  --mcp=remove|keep
+ *     --import-past | --no-import-past  --import-days=N   the one-time import of past sessions (asked in a terminal)
  *     --git-hooks | --no-git-hooks | --no-trailers   this repository's git hooks (lib/githooks.mjs)
  *   keepplain privacy [set --stdin]           the words to hide in every session (privacy.json); set takes a JSON list on stdin
+ *   keepplain import-past [start|status|stop|teams|share] the one-time import of this computer's past sessions to your private drafts
+ *                                                 (lib/past.mjs): finds them, asks, and sends them in the background, oldest
+ *                                                 first, as far as the site's daily allowance goes; the rest go the next days.
+ *                                                 --days=N (30), --agent=…; --json: found or the state, start for the app.
+ *                                                 Sessions in a team's repositories are offered to the team: teams says
+ *                                                 which, share --team=<slug> --stdin takes the ids that go to it ([] none)
+ *   node keepplain.mjs import-past run        what goes on with it in the background (enable, login, the SessionStart hook)
+ *   node keepplain.mjs auto-send <id> --past  one past session of that import: to the private drafts, as trigger backfill
  *   keepplain version | help
  *   --json                                      for a program (the desktop app, desktop/): status, sessions, preview, send,
  *                                                 discard, login, whoami, logout, enable, disable, auto, rules, nudge and
@@ -88,7 +97,7 @@ import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { createInterface as createPrompt } from 'node:readline/promises';
 import { gzipSync } from 'node:zlib';
-import { AUTO_MODES, autoMode, autoSession, catchUp, currentSize, logAuto, logFile, recentAuto, RUNNING_MODES, sessionAutoMode, setAutoMode, trackSession } from './lib/auto.mjs';
+import { AUTO_MODES, autoMode, autoSession, catchUp, currentSize, inBackground, logAuto, logFile, recentAuto, RUNNING_MODES, sessionAutoMode, setAutoMode, trackSession } from './lib/auto.mjs';
 import { siteUrl } from './lib/config.mjs';
 import { clearPendingLogin, forgetToken, home as credentialsHome, pendingLogin, savedToken, savedUsername, savePendingLogin, saveToken, writePrivate } from './lib/credentials.mjs';
 import { Failure } from './lib/failure.mjs';
@@ -107,6 +116,7 @@ import { MEMORY_TOOLS, workContext, memoryArguments } from './lib/work-memory.mj
 import { ForkWatch, SESSION_ID, TitleWatch, cutOwnCommand, formatBytes, formatDuration, isCodexPrompt, newestSessionId, promptText, summarize } from './lib/session.mjs';
 import { currentCursorSession, cursorPrompt, readCursorSidecar, withCursorTimes } from './lib/cursor.mjs';
 import { piPrompt } from './lib/pi.mjs';
+import { BUSY_WAIT_MS, byProject, choosePast, describeProjects, findPast, MAX_TRIES, PACE_MS, PAST_DAYS, pastDays, pastDue, pastState, pastSummary, promptLine, queuePast, releaseLock, setPastState, takeLock, teamOffers, touchLock, UNREACHABLE_WAIT_MS } from './lib/past.mjs';
 import { continuationChain, continuationOf } from './lib/continuation.mjs';
 import { extractTaskKeys } from './lib/grouping.mjs';
 import { readSidecar } from './lib/sidecar.mjs';
@@ -194,7 +204,7 @@ try {
     else if (command === 'send') await send(sessionId());
     else if (command === 'discard') discard(sessionId());
     else if (command === 'auto') await auto(argId);
-    else if (command === 'auto-send') await autoSend(argId, { final: !args.includes('--sync'), push: args.includes('--push') });
+    else if (command === 'auto-send') await autoSend(argId, { final: !args.includes('--sync'), push: args.includes('--push'), past: args.includes('--past') });
     else if (command === 'auto-catch-up') await autoCatchUp(argId);
     else if (command === 'team-rules-check') await teamRulesCheck();
     else if (command === 'rules') await rules(argId);
@@ -214,7 +224,8 @@ try {
     else if (command === 'share') await share(argId);
     else if (command === 'share-auto') await shareAuto();
     else if (command === 'privacy') await privacyWords(argId);
-    else if (command === 'enable') await enable({ site, version: VERSION, interactive: TERMINAL, flags: setupFlags(), json: JSON_OUT });
+    else if (command === 'import-past') await importPast(argId);
+    else if (command === 'enable') await enable({ site, version: VERSION, interactive: TERMINAL, flags: setupFlags(), json: JSON_OUT, account: myAccount, signedIn: Boolean(token) });
     else if (command === 'disable') await disable({ interactive: TERMINAL, flags: setupFlags(), json: JSON_OUT });
     else if (command === 'status') {
         if (JSON_OUT) emit(statusJson());
@@ -239,6 +250,7 @@ function help() {
     const commands = [
         ['login', 'sign in through the browser'],
         ['enable', 'connect Claude Code and Codex to KeepPlain'],
+        ['import-past', 'import your sessions of the last 30 days to your private drafts, once'],
         ['disable', 'take that off again'],
         ['status', 'how things are: sign-in, agents, auto mode'],
         ['sessions [--limit=N] [--all]', "this folder's sessions, newest first; --all: every folder's"],
@@ -277,6 +289,8 @@ function setupFlags() {
         mcp: option('mcp'),
         gitHooks: args.includes('--git-hooks') || args.includes('--no-trailers') ? true : args.includes('--no-git-hooks') ? false : undefined,
         trailers: args.includes('--no-trailers') ? false : undefined,
+        importPast: args.includes('--import-past') ? true : args.includes('--no-import-past') ? false : undefined,
+        importDays: option('import-days'),
     };
 }
 
@@ -331,8 +345,10 @@ function pruneOwnSnapshots() {
  * cuts itself off the end ($cut). A session that ended by itself has no run in progress, and cutting at an earlier
  * /keepplain:build would lose the rest.
  */
-async function prepare(id, cut = true) {
-    const path = sessionPath(AGENT.id, id, env, AGENT.id === 'cursor' ? readCursorSidecar(id, env)?.transcript_path : null);
+async function prepare(id, cut = true, past = false) {
+    // What Cursor's hooks noted; a past conversation (the import, lib/past.mjs) has none, only the folder it found for it.
+    const cursorNotes = AGENT.id === 'cursor' ? (readCursorSidecar(id, env) ?? (option('cwd') ? { cwd: option('cwd') } : null)) : null;
+    const path = sessionPath(AGENT.id, id, env, cursorNotes?.transcript_path ?? null);
     if (!path) {
         throw new Failure({
             codex: `Could not find this session's rollout (rollout-…-${id}.jsonl) under the Codex sessions folder.`,
@@ -347,7 +363,7 @@ async function prepare(id, cut = true) {
     const chain = AGENT.id === 'claude-code' ? await continuationChain(id, path, sidecar?.cwd ?? null) : null;
     const earlier = chain?.sessions ?? [];
     const continued = chain?.continuation ?? null;
-    const session = await readSession(path, id, continued?.inherited, AGENT.id === 'cursor' ? readCursorSidecar(id, env) : null, earlier.map((s) => s.path));
+    const session = await readSession(path, id, continued?.inherited, cursorNotes, earlier.map((s) => s.path));
     if (session === null) throw new Failure(`This session file is not in the format ${AGENT.name} writes, so it cannot be sent.`);
     // A fork is a fork: its copied lines say so themselves.
     session.continuation = session.fork ? null : continued ? { session_id: continued.session_id, at: continued.at } : session.continuation;
@@ -370,10 +386,12 @@ async function prepare(id, cut = true) {
     // HEAD at the start: Claude Code's SessionStart hook remembered it, Codex writes it into the session itself.
     // A fork starts where it left the original: the original's commits are not the fork's.
     const startedAt = Date.parse(session.fork?.at ?? '') || stats.startedAt;
-    const git = checkedGit(gitContext(sidecar?.cwd ?? stats.cwd, sidecar?.head ?? session.headStart, startedAt), privacy);
+    // A past session ended long before today's HEAD: its commits are those up to its own end (lib/git.mjs, gitContext).
+    const ended = past ? { endedAt: statSync(path).mtimeMs, branch: session.branch } : null;
+    const git = checkedGit(gitContext(sidecar?.cwd ?? stats.cwd, sidecar?.head ?? session.headStart, startedAt, ended), privacy);
     // The folders added to the session that are repositories of their own: their commits, under the folder's name.
     // The name goes through the same check as the session's lines, where it names the folder's files.
-    const gitFolders = folderGitContexts(session.folders, sidecar?.cwd ?? stats.cwd, startedAt).map((g) => checkedGit({ ...g, folder: privacy.text(g.folder) }, privacy));
+    const gitFolders = folderGitContexts(session.folders, sidecar?.cwd ?? stats.cwd, startedAt, ended).map((g) => checkedGit({ ...g, folder: privacy.text(g.folder) }, privacy));
 
     // The project the session belongs to (grouping plan, 23.1): a hash and the folder's name, never the path.
     const found = projectOf(sidecar?.cwd ?? stats.cwd);
@@ -484,6 +502,7 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
     const code = { files: new Set(), additions: 0, deletions: 0, withheld: new Set() };
     let cwd = null;
     let headStart = null;
+    let branch = null;
     let total = 0;
     let parsed = 0;
     const seen = new Set();
@@ -515,7 +534,10 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
             if (d.type === 'session_meta') {
                 cwd ??= typeof d.payload?.cwd === 'string' ? d.payload.cwd : null;
                 headStart ??= typeof d.payload?.git?.commit_hash === 'string' ? d.payload.git.commit_hash : null;
+                branch ??= typeof d.payload?.git?.branch === 'string' && d.payload.git.branch ? d.payload.git.branch : null;
             }
+            // The branch the session ran on (Claude Code's lines say it): where a past session's commits are looked for.
+            if (typeof d.gitBranch === 'string' && d.gitBranch && d.gitBranch !== 'HEAD') branch = d.gitBranch;
             cwd ??= typeof d.cwd === 'string' && d.cwd ? d.cwd : null;
             // Counted before slimming drops the lines that carry it; only the counts leave the machine. A fork's inherited
             // lines were counted with the original, and what the original took from the library is the original's; the
@@ -548,6 +570,7 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
         lines: cursorNotes ? withCursorTimes(lines, cursorNotes) : lines,
         cwd: cwd ?? cursorNotes?.cwd ?? null,
         headStart,
+        branch,
         bytes: files.reduce((sum, f) => sum + statSync(f).size, 0),
         usage: usage.result() ?? noted,
         code,
@@ -858,8 +881,23 @@ async function waitForApproval(until = Date.now() + LOGIN_WAIT_MS) {
             clearPendingLogin();
             // A Claude Code started before the sign-in noted the server's 401 and keeps it for about 15 minutes.
             forgetMcpNeedsAuth();
-            if (JSON_OUT) return emit({ event: 'connected', username: state.username });
+            // The import of past sessions agreed to before the sign-in (enable), or waiting for a new one, goes on now.
+            const past = pastState(site);
+            const waiting = past?.status === 'login' && past.queue?.length;
+            if (waiting) setPastState(site, { status: 'running', started_at: past.started_at ?? Date.now(), next_at: null, why: null });
+            if (JSON_OUT) {
+                if (waiting || pastDue(site)) inBackground(['import-past', 'run', `--site=${site}`]);
+                return emit({ event: 'connected', username: state.username });
+            }
             console.log(`Connected to ${site} as @${state.username}. ${run('build')} can send sessions now.`);
+            if (waiting && TERMINAL && !past.started_at) {
+                // Agreed to before signing in: the team question enable could not ask then (none of it went yet).
+                const listed = pastState(site).all ?? [];
+                await askTeams(listed);
+                for (const team of new Set(listed.map((q) => q.share).filter(Boolean))) choosePast(site, team, listed.filter((q) => q.share === team).map((q) => q.id));
+            }
+            if (waiting || pastDue(site)) inBackground(['import-past', 'run', `--site=${site}`]);
+            if (waiting) console.log(pastStartedLine(past.queue.length, true));
             if (AGENT.id === 'claude-code') console.log('If Claude Code is open, run /mcp → Reconnect for keepplain, or start a new session: its library tools connect then.');
             return;
         }
@@ -1639,6 +1677,8 @@ function skipReason(reason) {
     if (reason === 'published') return 'already published';
     // A later session of the same conversation went on from it (an edit of a sent message): its draft is that one's.
     if (reason === 'superseded') return 'the conversation went on in a later session, whose draft has this one';
+    // The import of past sessions: the session already has a draft, sent by hand, by auto mode or from another computer.
+    if (reason === 'already_sent') return 'already on the site';
 
     return 'its draft is not yours to change';
 }
@@ -1647,27 +1687,45 @@ function skipReason(reason) {
  * Run by the hooks in the background, if auto mode wants the session: SessionEnd sends one that ended ($final), Stop
  * (and Claude Code's PostToolUse, during a long turn) syncs one that is still going, SessionStart catches up on those
  * that never said they ended ($caughtUp), the pre-push git hook sends those behind a push ($push; the only sends of
- * push mode). Never prints (nobody is watching); every outcome goes to the auto log instead, and what went to
+ * push mode), and the import of past sessions one of those ($past: the person agreed to it once, whatever auto mode
+ * is; lib/past.mjs). Never prints (nobody is watching); every outcome goes to the auto log instead, and what went to
  * auto-sessions.json.
  */
-async function autoSend(id, { final = true, caughtUp = false, push = false } = {}) {
-    const mode = sessionAutoMode(site, id, AGENT.id);
+async function autoSend(id, { final = true, caughtUp = false, push = false, past = false } = {}) {
+    const mode = past ? 'past' : sessionAutoMode(site, id, AGENT.id);
     if (!mode || (mode === 'push' && !push) || !SESSION_ID.test(id ?? '')) return;
     const log = (result) => logAuto(`${AGENT.id === 'claude-code' ? '' : `${AGENT.id} `}${id} ${result}`);
     const remember = (patch) => trackSession(site, id, patch);
-    // Nothing went: the session-end hook stops waiting for it (lib/auto.mjs, waitForSend).
-    const giveUp = (result) => (remember({ failed: Date.now() }), log(result));
+    // Nothing went: the session-end hook stops waiting for it (lib/auto.mjs, waitForSend). The import of past sessions
+    // reads why (pastRun): a daily limit waits for the time the site named, a busy site a minute, one out of reach half
+    // an hour, a sign-in that stopped working the next one, and an import the site closed stops.
+    const giveUp = (result, e = null) => {
+        const now = Date.now();
+        const at = (yes) => (yes ? now : undefined);
+        const limited = e?.code === 'limit_reached' ? { at: now, until: now + (e.retryAfterMs ?? untilUtcMidnight(now)), reason: e.reason ?? null } : undefined;
+        remember({
+            failed: now,
+            limited,
+            busy: at(['rate_limited', 'import_running'].includes(e?.code)),
+            unreachable: at(e?.unavailable),
+            unauthorized: at(e?.status === 401),
+            closed: at(e?.code === 'backfill_closed'),
+        });
+        log(result);
+    };
     // Not sent for what the file holds now: looked at again once it grows (lib/auto.mjs, trackSession), said once.
     const hold = (size, why, result) => {
         const before = autoSession(site, id)?.held?.why;
         remember({ held: { at: Date.now(), size, why }, skip: null });
         if (before !== why) log(result);
     };
-    if (!token) return giveUp('skipped: this computer is not connected');
+    if (!token) return giveUp('skipped: this computer is not connected', { status: 401 });
+    // Turned off for itself since the import was set up: it stays here.
+    if (past && autoSession(site, id)?.own === 'off') return hold(currentSize(autoSession(site, id)) ?? 0, 'turned off for this session', 'skipped: auto mode is off for this session');
 
     let session;
     try {
-        session = await prepare(id, false);
+        session = await prepare(id, false, past);
     } catch (e) {
         const size = e instanceof Failure ? currentSize(autoSession(site, id)) : null;
         return size === null ? giveUp(`skipped: ${e instanceof Failure ? e.message : e}`) : hold(size, e.message, `skipped: ${e.message}`);
@@ -1689,7 +1747,10 @@ async function autoSend(id, { final = true, caughtUp = false, push = false } = {
         space = asking[0].slug;
     }
 
-    const form = () => importForm(id, session.gz, { git: session.git, gitFolders: session.gitFolders, usage: session.usage, space, trigger: 'auto', final, privacy: privacySummary(session.privacy), fork: session.fork, library: session.library, project: session.project, continuation: session.continuation, title: session.title, taskKeys: session.taskKeys, chain: session.earlier });
+    // Past sessions go private, as the question said, whatever the repository: those the person shares with a team move
+    // there after they went (import-past share, pastRun).
+    if (past) space = 'personal';
+    const form = () => importForm(id, session.gz, { git: session.git, gitFolders: session.gitFolders, usage: session.usage, space, trigger: past ? 'backfill' : 'auto', final, privacy: privacySummary(session.privacy), fork: session.fork, library: session.library, project: session.project, continuation: session.continuation, title: session.title, taskKeys: session.taskKeys, chain: session.earlier });
     // A sync still being imported holds the draft for a moment; the end of the session waits for it rather than get lost.
     for (let attempt = 1; ; attempt++) {
         try {
@@ -1702,7 +1763,7 @@ async function autoSend(id, { final = true, caughtUp = false, push = false } = {
             const went = r.space ? { type: r.space.type === 'team' ? 'team' : 'personal', name: r.space.type === 'team' ? r.space.name : null } : undefined;
             remember({ sent: { ...sent, url: r.edit_url ?? undefined, space: went }, held: null, skip: null });
             const where = r.space?.type === 'team' ? r.space.name : 'your private Builds';
-            const sentLine = `${final ? 'sent' : 'synced, still going,'} to ${where}${caughtUp ? ' at the next start' : push ? ' at a push' : ''}: ${r.edit_url}`;
+            const sentLine = `${past ? 'imported, a past session,' : final ? 'sent' : 'synced, still going,'} to ${where}${caughtUp ? ' at the next start' : push ? ' at a push' : ''}: ${r.edit_url}`;
             // Codex ends the session-end hook's processes when it exits, maybe before the import is done: said at once.
             const early = CODEX && final && !caughtUp && !push;
             if (early) log(sentLine);
@@ -1723,7 +1784,7 @@ async function autoSend(id, { final = true, caughtUp = false, push = false } = {
             }
             // A sync while another one of it is being imported (two hooks found it due at once): that one has it all.
             if (!final && e.code === 'import_running') return;
-            return giveUp(`failed: ${e.message}`);
+            return giveUp(`failed: ${e.message}`, e);
         }
     }
 }
@@ -1760,6 +1821,317 @@ async function autoCatchUp(current) {
         trackSession(site, id, { tried: Date.now() });
         await autoSend(id, { final, caughtUp: true });
     }
+}
+
+/** Milliseconds to the next midnight UTC, when the site's daily allowances start again. */
+function untilUtcMidnight(now = Date.now()) {
+    const d = new Date(now);
+
+    return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - now;
+}
+
+/**
+ * `import-past [start|status|stop]` (lib/past.mjs): the one-time import of this computer's past sessions to the person's
+ * private drafts. Without a word, in a terminal: finds them, says how many of which projects, asks (yes by default) and
+ * starts it; for a program (--json) it only says what it found, and `start` starts it, which is the app's tick.
+ */
+async function importPast(action) {
+    if (action === 'run') return pastRun();
+    if (action === 'status') return pastStatusOut();
+    if (action === 'teams') return pastTeamsOut();
+    if (action === 'share') return pastShare();
+    if (action === 'stop') {
+        const state = pastState(site);
+        const going = state && ['running', 'login'].includes(state.status);
+        if (going) setPastState(site, { status: 'stopped', queue: [], next_at: null, finished_at: Date.now() });
+        if (JSON_OUT) return emit({ past_import: pastSummary(site) });
+        return console.log(going ? `The import of past sessions is stopped. ${state.sent ?? 0} went to your private drafts; the rest stay on this computer.` : 'There is no import of past sessions going on.');
+    }
+    if (action && action !== 'start') throw new Failure(`Use keepplain import-past, keepplain import-past start, status, stop, teams or share.`);
+
+    const days = pastDays(option('days')) ?? PAST_DAYS;
+    if (Number.isNaN(days)) throw new Failure('--days takes a whole number of days from 1 to 90.');
+    const current = pastState(site);
+    // Asked again while it runs: how it is going, and it is started again when it waits for nothing. Never queued twice.
+    if (current && ['running', 'login'].includes(current.status) && (current.queue?.length ?? 0) > 0) {
+        if (token && pastDue(site)) inBackground(['import-past', 'run', `--site=${site}`]);
+        return pastStatusOut();
+    }
+    // It runs once per account: the site says whether it still takes past sessions.
+    const open = token ? ((await myAccount())?.past_import ?? null) : null;
+    if (open?.open === false) {
+        if (JSON_OUT) return emit({ found: 0, days, closed: true, closes_at: open.closes_at ?? null, past_import: pastSummary(site) });
+        return console.log(`Your past sessions were imported from ${new Date(open.started_at).toLocaleDateString()}: that import runs once per account. ${run('build')} sends a session, auto mode sends them as you work.`);
+    }
+
+    const agents = option('agent') ? [AGENT.id] : AGENT_IDS;
+    const { sessions: found, unknown } = await findPast({ site, agents, days });
+    if (JSON_OUT && !action) {
+        const byAgent = Object.fromEntries(agents.map((a) => [a, found.filter((s) => s.agent === a).length]).filter(([, n]) => n));
+        return emit({ found: found.length, days, agents: byAgent, projects: byProject(found), unknown_folder: unknown, closed: false, past_import: pastSummary(site) });
+    }
+    if (!found.length) {
+        if (JSON_OUT) return emit({ queued: 0, past_import: pastSummary(site) });
+        const left = unknown ? ` ${unknown} Cursor conversation${unknown === 1 ? ' was' : 's were'} left out: the folder ${unknown === 1 ? 'it' : 'they'} ran in is not known.` : '';
+        return console.log(`No ${SESSION_KINDS} sessions of the last ${days} days left to import: none with a prompt that was not sent already.${left}`);
+    }
+    if (!action) {
+        console.log(`Found ${found.length} past session${found.length === 1 ? '' : 's'} of the last ${days} days: ${describeProjects(found)}.`);
+        if (!TERMINAL && !args.includes('--yes')) return console.log(`Run keepplain import-past start to import them to your private drafts.`);
+        if (TERMINAL && !args.includes('--yes') && !(await askYes(`Import your sessions from the last ${days} days? They stay private: your own drafts. [Y/n]`))) {
+            return console.log('Nothing was sent.');
+        }
+        // Then, one question per team whose repositories some of them ran in.
+        if (TERMINAL && !args.includes('--yes')) await askTeams(found);
+    }
+
+    const state = queuePast(site, found, { days, agents, signedIn: Boolean(token) });
+    if (token) inBackground(['import-past', 'run', `--site=${site}`]);
+    if (JSON_OUT) return emit({ queued: found.length, past_import: pastSummary(site) });
+    console.log(pastStartedLine(state.total, Boolean(token)));
+}
+
+/**
+ * In a terminal: one question per team whose repositories some of $sessions ran in; yes by default only when auto
+ * mode already sends this computer's sessions there. Marks the ones to share (share: team).
+ */
+async function askTeams(sessions) {
+    for (const offer of teamOffers(sessions, await myTeams(), (agent) => autoMode(site, agent))) {
+        const n = offer.sessions.length;
+        if (await askYes(`${n === 1 ? 'One of these sessions' : `${n} of these sessions`} ran in ${offer.name}'s repositories. Share ${n === 1 ? 'it' : 'them'} with ${offer.name} too? [${offer.default ? 'Y/n' : 'y/N'}]`, offer.default)) {
+            for (const s of offer.sessions) s.share = offer.slug;
+        }
+    }
+}
+
+/** A yes-or-no question in the terminal; Enter alone gives $fallback. */
+async function askYes(question, fallback = true) {
+    const prompt = createPrompt({ input: process.stdin, output: process.stdout });
+    try {
+        const answer = (await prompt.question(`${question} `)).trim().toLowerCase();
+
+        return answer === '' ? fallback : answer.startsWith('y');
+    } finally {
+        prompt.close();
+    }
+}
+
+/** What the site says of this account (/api/v1/me), or null when not signed in or out of reach. */
+async function myAccount() {
+    if (!token) return null;
+    try {
+        return await api('GET', '/api/v1/me', undefined, true, 15000);
+    } catch {
+        return null;
+    }
+}
+
+/** The person's teams as the site says: [] when not signed in or the site cannot be reached. */
+async function myTeams() {
+    return (await myAccount())?.teams ?? [];
+}
+
+/**
+ * `import-past teams`: the sessions of the import (or, before one, those it would take) that ran in each of the
+ * person's teams' repositories, with whether sharing is the default; the app's share screen lists them, each with the
+ * start of its first prompt, read from its file here (the import's file keeps none).
+ */
+async function pastTeamsOut() {
+    if (!token) throw notConnected();
+    const state = pastState(site);
+    const sessions = state?.all?.length ? state.all : (await findPast({ site, agents: AGENT_IDS, days: pastDays(option('days')) || PAST_DAYS })).sessions;
+    const offers = teamOffers(sessions, await myTeams(), (agent) => autoMode(site, agent));
+    if (JSON_OUT) {
+        const teams = [];
+        for (const o of offers) {
+            const listed = [];
+            for (const s of o.sessions) listed.push({ id: s.id, agent: s.agent, project: s.project, prompt: await promptLine(s), last_active: new Date(s.mtimeMs).toISOString(), share: s.share === o.slug });
+            teams.push({ slug: o.slug, name: o.name, default: o.default, sessions: listed });
+        }
+        return emit({ teams });
+    }
+    if (!offers.length) return console.log('None of these sessions ran in your teams\' repositories.');
+    for (const o of offers) console.log(`${o.name} (${o.slug}): ${o.sessions.length} session${o.sessions.length === 1 ? '' : 's'}, ${o.sessions.filter((s) => s.share === o.slug).length} to share. keepplain import-past share --team=${o.slug} --stdin takes the ids that go to it.`);
+}
+
+/**
+ * `import-past share --team=<slug> --stdin`: the ids (a JSON list on stdin; [] keeps them all private) of the import's
+ * sessions that go to that team; ids that are not the import's are left out. Those that went already are moved now,
+ * and only once that worked is the choice kept for the rest, which move right after they go (pastRun).
+ */
+async function pastShare() {
+    if (!token) throw notConnected();
+    const team = option('team')?.trim().toLowerCase();
+    if (!team || !/^[a-z0-9-]{1,40}$/.test(team)) throw new Failure('Name the team: --team=<slug>.');
+    let ids;
+    try {
+        ids = JSON.parse((await readAll(process.stdin)) || '[]');
+    } catch {
+        ids = null;
+    }
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !SESSION_ID.test(id))) throw new Failure('share takes a JSON list of session ids on stdin.');
+    const state = pastState(site);
+    if (!state?.all?.length) throw new Failure('There is no import of past sessions to share from.');
+    const mine = new Set(state.all.map((s) => s.id));
+    ids = [...new Set(ids)].filter((id) => mine.has(id));
+    const moved = await shareSent(team, ids);
+    choosePast(site, team, ids);
+    if (JSON_OUT) return emit({ team, chosen: ids.length, moved_now: moved, past_import: pastSummary(site) });
+    console.log(ids.length ? `${ids.length} session${ids.length === 1 ? '' : 's'} go to ${team}: ${moved} moved now, the rest once they are imported.` : `The sessions of ${team}'s repositories stay private.`);
+}
+
+/** Moves to $team those of $ids that went already, a hundred at a time; the runner moves the others after they go. */
+async function shareSent(team, ids) {
+    const sent = ids.filter((id) => sentAt(site, id));
+    let moved = 0;
+    for (let i = 0; i < sent.length; i += 100) {
+        const r = await api('POST', `/api/v1/teams/${encodeURIComponent(team)}/sessions`, json({ session_ids: sent.slice(i, i + 100) }), true, 120000);
+        moved += r.moved ?? 0;
+    }
+    if (moved) setPastState(site, (now) => ({ shared: (now?.shared ?? 0) + moved }));
+
+    return moved;
+}
+
+/** What import-past and login say once the import is set up. */
+function pastStartedLine(total, signedIn) {
+    const what = `${total} past session${total === 1 ? '' : 's'}`;
+
+    return signedIn
+        ? `Importing ${what} to your private drafts in the background, oldest first. Secrets the check recognises are redacted on this computer first, as in auto mode. keepplain import-past status says how far it got; keepplain import-past stop stops it.`
+        : `${what} will go to your private drafts once you sign in (${run('login')}).`;
+}
+
+function pastStatusOut() {
+    const s = pastSummary(site);
+    if (JSON_OUT) return emit({ past_import: s });
+    if (!s) return console.log(`No import of past sessions yet. keepplain import-past finds them and asks.`);
+    const counts = `${s.sent} of ${s.total} imported${s.shared ? `, ${s.shared} shared with a team` : ''}${s.skipped ? `, ${s.skipped} with nothing to keep` : ''}${s.failed ? `, ${s.failed} failed (see ${logFile()})` : ''}`;
+    const waiting = s.why === 'daily_limit' ? "The site's daily allowance for the import is used up" : 'The site could not be reached';
+    const line = {
+        login: s.why === 'login'
+            ? `Importing past sessions: ${counts}; ${s.left} left. The sign-in was not accepted: the rest go after ${run('login')}.`
+            : `The import of ${s.total} past sessions starts once you sign in (${run('login')}).`,
+        done: `The import of past sessions is done: ${counts}.`,
+        stopped: `The import of past sessions was stopped: ${counts}.`,
+        declined: 'You said no to importing your past sessions. keepplain import-past asks again.',
+        closed: `The site takes no more past sessions (the import runs once per account): ${counts}; ${s.left} stayed on this computer.`,
+        running: s.next_at
+            ? `Importing past sessions: ${counts}; ${s.left} left. ${waiting}: it goes on after ${new Date(s.next_at).toLocaleString()}, at the next agent session start or keepplain import-past.`
+            : s.active
+              ? `Importing past sessions: ${counts}; ${s.left} left.`
+              : `Importing past sessions: ${counts}; ${s.left} left. It goes on at the next agent session start, or now with keepplain import-past.`,
+    }[s.status];
+    console.log(line ?? counts);
+}
+
+/**
+ * `import-past run`, in the background: the queue's sessions one at a time, PACE_MS apart, each by `auto-send --past` in
+ * a process of its own (its AGENT is that session's agent), which leaves what happened in auto-sessions.json. One runner
+ * at a time (the lock). A daily limit or a site out of reach stops it until next_at; whoever starts it again goes on.
+ */
+async function pastRun() {
+    if (!token || !takeLock()) return;
+    let last = 0;
+    try {
+        for (;;) {
+            const state = pastState(site);
+            if (state?.status !== 'running') return;
+            const next = state.queue?.[0];
+            if (!next) {
+                setPastState(site, { status: 'done', finished_at: Date.now(), next_at: null, why: null });
+                logAuto(`past sessions: done, ${state.sent ?? 0} of ${state.total ?? 0} imported`);
+                return;
+            }
+            if (state.next_at > Date.now()) return;
+            // Turned off for itself since it was queued (`auto session off`): it stays on this computer.
+            if (autoSession(site, next.id)?.own === 'off') {
+                pastOutcome(next.id, 'skipped');
+                continue;
+            }
+            const wait = last + PACE_MS - Date.now();
+            if (wait > 0) await sleep(wait);
+            // Another runner took the lock over (this one was thought dead): it goes on, this one stops.
+            if (!touchLock()) return;
+            const started = (last = Date.now());
+            // past: auto mode's catch-up leaves it alone (lib/auto.mjs, catchUp); the import sends it.
+            trackSession(site, next.id, { path: next.path, agent: next.agent, tried: started, past: true });
+            await runSelf(['auto-send', next.id, '--past', `--agent=${next.agent}`, `--site=${site}`, ...(next.agent === 'cursor' && next.cwd ? [`--cwd=${next.cwd}`] : [])]);
+
+            const s = autoSession(site, next.id);
+            const since = (at) => (at ?? 0) >= started;
+            if (since(s?.limited?.at)) {
+                setPastState(site, { next_at: s.limited.until, why: 'daily_limit' });
+                logAuto(`past sessions: the daily allowance for the import is used up, the rest go after ${new Date(s.limited.until).toISOString()}`);
+                return;
+            }
+            if (since(s?.closed)) {
+                setPastState(site, { status: 'closed', finished_at: Date.now(), next_at: null, why: 'closed' });
+                logAuto('past sessions: the site takes no more, the import runs once per account');
+                return;
+            }
+            if (since(s?.unauthorized)) {
+                // The sign-in stopped working: the queue waits for the next one (login).
+                setPastState(site, { status: 'login', next_at: null, why: 'login' });
+                logAuto('past sessions: the sign-in was not accepted, the rest go after keepplain login');
+                return;
+            }
+            if (since(s?.busy) || since(s?.unreachable)) {
+                const tries = (next.tries ?? 0) + 1;
+                if (tries >= MAX_TRIES) {
+                    logAuto(`${next.id} past session left out after ${tries} tries: the site could not take it`);
+                    pastOutcome(next.id, 'failed');
+                    continue;
+                }
+                setPastState(site, (now) => ({ queue: (now?.queue ?? []).map((q) => (q.id === next.id ? { ...q, tries } : q)) }));
+                if (since(s?.busy)) {
+                    await sleep(BUSY_WAIT_MS);
+                    continue;
+                }
+                setPastState(site, { next_at: Date.now() + UNREACHABLE_WAIT_MS, why: 'unreachable' });
+                return;
+            }
+            // A send the site took and kept; one it found nothing in (EmptyDrafts) has no draft, nor a link.
+            const kept = since(s?.sent?.at) && Boolean(s.sent.url);
+            const outcome = kept ? 'sent' : since(s?.sent?.at) || since(s?.held?.at) || s?.skip ? 'skipped' : 'failed';
+            // auto-sessions.json forgets in two weeks, sent.json in 90 days: a later import never finds it again.
+            if (kept) markSent(site, next.id, s.sent.url, s.sent.at, { agent: next.agent, space: s.sent.space, how: 'past' });
+            // Recorded also when the person stopped it meanwhile: what went, went.
+            const team = pastOutcome(next.id, outcome)?.share;
+            // The person chose to share it with a team (maybe while it went: the choice is read from the file now).
+            if (kept && team) {
+                try {
+                    if (await shareSent(team, [next.id])) logAuto(`${next.id} shared with ${team}, as you chose`);
+                } catch (e) {
+                    logAuto(`${next.id} not shared with ${team}: ${e.message}`);
+                }
+            }
+        }
+    } finally {
+        releaseLock();
+    }
+}
+
+/** One session of the import is done with: out of the queue, counted. Returns its queue entry as it was on disk. */
+function pastOutcome(id, outcome) {
+    let item = null;
+    setPastState(site, (now) => {
+        item = (now?.queue ?? []).find((q) => q.id === id) ?? null;
+
+        return { queue: (now?.queue ?? []).filter((q) => q.id !== id), [outcome]: (now?.[outcome] ?? 0) + 1, next_at: null, why: null };
+    });
+
+    return item;
+}
+
+/** `keepplain <args>` as a child, waited for: its exit code, or null when it could not start. */
+function runSelf(childArgs) {
+    return new Promise((resolve) => {
+        const [program, programArgs] = selfCommand(childArgs);
+        const child = spawn(program, programArgs, { stdio: 'ignore', windowsHide: true, env });
+        child.on('error', () => resolve(null));
+        child.on('exit', (code) => resolve(code));
+    });
 }
 
 /** The repository address goes with the session, so the person sees it here; the diff never does. */
@@ -1997,6 +2369,7 @@ function statusJson() {
         nudge: nudgeOn(),
         privacy: { file: join(credentialsHome(), 'privacy.json'), words, error: wordsError },
         last_sent: last ? { ...last, at: new Date(last.at).toISOString() } : null,
+        past_import: pastSummary(site),
         what_leaves: `${site}/plugins#what-leaves-your-machine`,
     };
 }
@@ -2112,12 +2485,14 @@ async function api(method, path, body, authorized = true, timeoutMs = null) {
 
     const error = data.error ?? {};
     const link = error.edit_url ? ` ${error.edit_url}` : '';
-    if (response.status === 401) throw new Failure(`The saved token was not accepted (revoked or from another site). Run ${run('login')} to connect again.`);
+    if (response.status === 401) throw Object.assign(new Failure(`The saved token was not accepted (revoked or from another site). Run ${run('login')} to connect again.`), { status: 401 });
     const wait = response.status === 429 && error.code !== 'limit_reached' ? retryAfter(error.retry_after ?? response.headers.get('retry-after')) : null;
     // A daily limit says in its own words when it resets; the per-minute one gets the wait the site asked for.
     const message = wait ? `Too many requests. Try again in ${wait}.` : `${error.message ?? `The site answered ${response.status}.`}${link}`;
     // The status and code say whether trying again later can help (auto mode does).
-    throw Object.assign(response.status >= 500 ? unavailable(message) : new Failure(message), { status: response.status, code: error.code });
+    // A daily limit's reason and when it resets: the import of past sessions waits for that (import-past run).
+    const resets = Number(error.retry_after ?? response.headers.get('retry-after'));
+    throw Object.assign(response.status >= 500 ? unavailable(message) : new Failure(message), { status: response.status, code: error.code, reason: error.reason, retryAfterMs: Number.isFinite(resets) && resets > 0 ? resets * 1000 : null });
 }
 
 /** retry_after or Retry-After in seconds as "N seconds" or "N minutes"; null when missing or not a number. */

@@ -15,7 +15,8 @@
  *                  sessionStart did not run). Auto mode: catches up in the background on this agent's
  *                  sessions that never said they ended (a crash, a closed terminal) and remembers this one. In a
  *                  repository on github.com, the share auto mode's check in the background when due (lib/share.mjs),
- *                  and one line on what it put into pull requests since the last start.
+ *                  and one line on what it put into pull requests since the last start. The import of past sessions
+ *                  the person agreed to goes on in the background when it waits for nothing (lib/past.mjs).
  *   stop           after each answer. Auto mode: sends the session in the background as still going when it grew and
  *                  the last send is five minutes old (lib/auto.mjs, syncIfDue). Otherwise, once per session that used
  *                  Builds from the library and changed code, one line suggesting to share it (lib/nudge.mjs): a JSON
@@ -36,6 +37,7 @@
  */
 import { agentArgs, commandIn } from './agent.mjs';
 import { autoMode, catchUp, inBackground, removeStaleTemps, RUNNING_MODES, sessionAutoMode, settled, stillHeld, syncIfDue, trackSession, waitForSend } from './auto.mjs';
+import { pastDue } from './past.mjs';
 import { siteUrl } from './config.mjs';
 import { savedToken } from './credentials.mjs';
 import { cursorEvent, noteCursorEvent, pruneCursorNotes, readCursorSidecar } from './cursor.mjs';
@@ -158,11 +160,13 @@ function sessionStart({ event, agent, site, id, agentArgs }, emit = true) {
     if (unsaid) out.additional_context = [unsaid, out.additional_context].filter(Boolean).join('\n\n');
     if (emit && Object.keys(out).length) console.log(JSON.stringify(out));
 
+    // The import of past sessions the person agreed to goes on: after a day's allowance, or a computer that was off.
+    if (pastDue(site)) inBackground(['import-past', 'run', `--site=${site}`, ...agentArgs]);
     if (!id) return;
     const running = RUNNING_MODES.includes(autoMode(site, agent));
     if (running) removeStaleTemps();
     // A resumed session turned on for itself goes on being sent.
-    if (RUNNING_MODES.includes(sessionAutoMode(site, id, agent))) trackSession(site, id, { path: event.transcript_path, agent });
+    if (RUNNING_MODES.includes(sessionAutoMode(site, id, agent))) trackSession(site, id, { path: event.transcript_path, agent, past: false });
     // Sessions turned on for themselves are caught up even when the computer's mode is off.
     if (catchUp(site, id, agent, undefined, undefined, running).length) inBackground(['auto-catch-up', id, ...agentArgs]);
 }
@@ -305,7 +309,7 @@ export function stopFailure({ event, agent, id }) {
 
 async function sessionEnd({ event, agent, site, id, agentArgs }) {
     if (!id || !RUNNING_MODES.includes(sessionAutoMode(site, id, agent))) return;
-    const session = trackSession(site, id, { path: event.transcript_path, agent });
+    const session = trackSession(site, id, { path: event.transcript_path, agent, past: false });
     if (settled(session) || stillHeld(session)) return;
 
     const started = Date.now();

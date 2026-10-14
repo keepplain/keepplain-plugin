@@ -18,6 +18,9 @@
  *     Codex's trust in the hooks stays Codex's: one line says where to give it;
  *   - in a git repository, one question about its git hooks (lib/githooks.mjs, --git-hooks, --no-git-hooks,
  *     --no-trailers), no unless they are there already. Every repository they went into is remembered, for disable.
+ *   - the one-time import of past sessions (lib/past.mjs): the agents' sessions of the last 30 days (--import-days=N)
+ *     that are still on disk go to the person's private drafts in the background. Asked once, yes by default, and only
+ *     in a terminal: --yes and --json import nothing without --import-past (the app's tick); --no-import-past skips it.
  * The choices are kept in ~/.keepplain/enable.json, so `keepplain update` lays the plugin out again the same way
  * (refresh): the plugin's version is always the file's.
  *
@@ -26,13 +29,14 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { agentId } from './agent.mjs';
+import { AGENT_IDS, agentId } from './agent.mjs';
 import { detectAgents, installedPlugins, manualMcpServers, piPackageDir, removeMcpServer, runCli } from './agents.mjs';
-import { autoMode, setAutoMode } from './auto.mjs';
+import { autoMode, inBackground, setAutoMode } from './auto.mjs';
 import { manualHookLines as cursorHookLines, installCursor, SKILLS as CURSOR_SKILLS, uninstallCursor } from './cursor-install.mjs';
 import { hooksOf, installedHooks, installHooks, manualHookLines, removeHooks, TRAILER } from './githooks.mjs';
 import { home, savedUsername, writePrivate } from './credentials.mjs';
 import { Failure } from './failure.mjs';
+import { describeProjects, findPast, PAST_DAYS, pastDays, pastState, pastSummary, queuePast, setPastState, teamOffers } from './past.mjs';
 import { MARKETPLACE, PLUGIN_ID, pluginFiles, pluginSources, psCommand, shCommand } from './plugin.mjs';
 import { BINARY_VERSION, selfProgram } from './runtime.mjs';
 
@@ -56,13 +60,18 @@ const RESTART = {
 };
 
 /**
- * @param {{site: string, version: string, interactive: boolean, flags: {yes?: boolean, agents?: string[], auto?: string, mcp?: string, gitHooks?: boolean, trailers?: boolean}}} context
- *        gitHooks: true or false from --git-hooks / --no-git-hooks, undefined to ask
+ * @param {{site: string, version: string, interactive: boolean, flags: {yes?: boolean, agents?: string[], auto?: string, mcp?: string, gitHooks?: boolean, trailers?: boolean, importPast?: boolean, importDays?: string}}} context
+ *        gitHooks: true or false from --git-hooks / --no-git-hooks, undefined to ask; importPast the same for the
+ *        import of past sessions, which only a terminal asks about. account: what the site says of the person
+ *        (/api/v1/me) or null: whether the import is still open (once per account) and their teams, for the question that
+ *        follows the import's in a terminal (share those of a team's repositories with it?). signedIn: the CLI has a token.
  */
-export async function enable({ site, version, interactive, flags, json = false }) {
+export async function enable({ site, version, interactive, flags, json = false, account = async () => null, signedIn = false }) {
     if (flags.auto !== undefined && !(flags.auto in AUTO)) throw new Failure(`--auto takes off, on, team or push, not "${flags.auto}".`);
     if (flags.mcp !== undefined && !['remove', 'keep'].includes(flags.mcp)) throw new Failure(`--mcp takes remove or keep, not "${flags.mcp}".`);
     if (!interactive && !flags.yes) throw new Failure('keepplain enable asks before it changes anything: run it in a terminal, or add --yes to go ahead with the defaults.');
+    const pastWindow = pastDays(flags.importDays) ?? PAST_DAYS;
+    if (Number.isNaN(pastWindow)) throw new Failure('--import-days takes a whole number of days from 1 to 90.');
 
     const agents = chosenAgents(flags.agents).filter((a) => a.present);
     if (!agents.length) throw new Failure('Found none of Claude Code, Codex, Cursor and Pi on this computer. Install one of them, then run keepplain enable again.');
@@ -129,6 +138,34 @@ export async function enable({ site, version, interactive, flags, json = false }
         }
         const trailers = flags.trailers ?? true;
 
+        // The import of past sessions: asked once (an answer is remembered), never without asking. --yes and --json
+        // import nothing unless --import-past says so. One already going is left as it is, never queued again; one the
+        // site closed (it runs once per account) is not offered.
+        const pastBefore = pastState(site);
+        const pastGoing = Boolean(pastBefore && ['running', 'login'].includes(pastBefore.status) && pastBefore.queue?.length);
+        const asking = flags.importPast === undefined && prompt && !flags.yes && !pastBefore;
+        const me = signedIn && !pastGoing && (flags.importPast === true || asking) ? await account() : null;
+        const pastClosed = me?.past_import?.open === false;
+        let past = null;
+        if ((flags.importPast === true || asking) && !pastGoing && !pastClosed) {
+            if (asking) log('Looking for your past sessions…');
+            // Every agent's sessions still on this computer (those of --agent only), as `import-past` finds them.
+            const { sessions } = await findPast({ site, agents: flags.agents?.length ? agents.map((a) => a.id) : AGENT_IDS, days: pastWindow });
+            if (sessions.length) {
+                const answer = flags.importPast === true ? 'y' : await ask(`Import your sessions from the last ${pastWindow} days? Found ${sessions.length}: ${describeProjects(sessions)}. They stay private: your own drafts. [Y/n]`, 'y');
+                past = { sessions, agreed: answer.startsWith('y') };
+            }
+        }
+        // Then one question per team whose repositories some of them ran in: yes by default only when the auto mode
+        // chosen above already sends this computer's sessions to that team.
+        if (past?.agreed && asking) {
+            for (const offer of teamOffers(past.sessions, me?.teams ?? [], () => AUTO[auto])) {
+                const n = offer.sessions.length;
+                const answer = await ask(`${n === 1 ? 'One of these sessions' : `${n} of these sessions`} ran in ${offer.name}'s repositories. Share ${n === 1 ? 'it' : 'them'} with ${offer.name} too? [${offer.default ? 'Y/n' : 'y/N'}]`, offer.default ? 'y' : 'n');
+                if (answer.startsWith('y')) for (const s of offer.sessions) s.share = offer.slug;
+            }
+        }
+
         // The plan, then the go-ahead.
         const installing = state.filter((s) => installable(s.agent) && !s.synced && (!s.others.length || s.replace));
         const plan = [`Lay out the plugin ${version} in ${pluginDir()}`];
@@ -145,6 +182,11 @@ export async function enable({ site, version, interactive, flags, json = false }
             }
         }
         plan.push(`Auto mode: ${auto}${auto === current ? ' (as it is)' : ''}`);
+        if (past?.agreed) plan.push(`Import ${past.sessions.length} past session${past.sessions.length === 1 ? '' : 's'} to your private drafts in the background, oldest first${signedIn ? '' : ', once you sign in'}`);
+        if (pastGoing && flags.importPast === true) plan.push('The import of past sessions goes on as it is: it is not started again');
+        const shares = new Map();
+        for (const s of past?.agreed ? past.sessions : []) if (s.share) shares.set(s.share, (shares.get(s.share) ?? 0) + 1);
+        for (const [team, n] of shares) plan.push(`Then move ${n} of them to the team ${team}, each once it is imported`);
         if (repo && gitHooks && repo.shared) plan.push(`Git hooks: ${repo.root} keeps its hooks in ${repo.dir} (core.hooksPath), which is not ours to change: the lines to add there are printed at the end`);
         else if (repo && gitHooks) plan.push(`Git hooks in ${repo.dir}: ${trailers ? 'prepare-commit-msg (the trailer) and pre-push' : 'pre-push only (no trailers)'}`);
         else if (repo && hooksThere.length) plan.push(`Git hooks: take ours out of ${repo.dir}`);
@@ -201,6 +243,11 @@ export async function enable({ site, version, interactive, flags, json = false }
             writeChoices({ ...readChoices(), git_hooks: (readChoices().git_hooks ?? []).filter((r) => r !== repo.root) });
         }
 
+        if (past?.agreed) {
+            queuePast(site, past.sessions, { days: pastWindow, agents: agents.map((a) => a.id), signedIn });
+            if (signedIn) inBackground(['import-past', 'run', `--site=${site}`]);
+        } else if (past) setPastState(site, { status: 'declined', asked_at: Date.now() });
+
         log('');
         for (const agent of done) say(installedLine(agent, version));
         for (const s of state.filter((x) => x.synced && installable(x.agent))) {
@@ -216,8 +263,15 @@ export async function enable({ site, version, interactive, flags, json = false }
         }
         if (repo && !repo.shared && gitHooks) say(`Git hooks are in ${repo.dir}. ${trailers ? `Commits made with a session get an ${TRAILER} trailer; a` : 'A'} push looks for the sessions behind it.`);
         if (repo && repo.shared && gitHooks) say(`Add these lines to the hooks in ${repo.dir}, right after the first line of each:\n\n${manualHookLines(selfProgram(), { trailers })}`);
+        if (pastClosed && flags.importPast === true) say('Your past sessions were imported already: that import runs once per account.');
+        if (past?.agreed) {
+            const n = past.sessions.length;
+            say(signedIn
+                ? `Importing ${n} past session${n === 1 ? '' : 's'} to your private drafts in the background, oldest first, as far as the site's daily allowance goes; the rest go the next days. keepplain import-past status says how far it got.`
+                : `${n} past session${n === 1 ? '' : 's'} will go to your private drafts once you sign in.`);
+        }
         if (!savedUsername(site)) say(`Not signed in to ${site} yet: run keepplain login.`);
-        event({ event: 'done', installed: done.map((a) => ({ id: a.id, name: a.name, restart: RESTART[a.id] })), failed, notes: said, auto, signed_in: Boolean(savedUsername(site)) });
+        event({ event: 'done', installed: done.map((a) => ({ id: a.id, name: a.name, restart: RESTART[a.id] })), failed, notes: said, auto, signed_in: Boolean(savedUsername(site)), past_import: pastSummary(site) });
     } finally {
         prompt?.close();
     }

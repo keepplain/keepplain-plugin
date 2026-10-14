@@ -64,7 +64,8 @@ const state = {
     loading: false,
     loadedAt: 0,
     account: null,
-    wizard: { phase: 'idle', login: null, loginError: null, agents: [], error: null, done: null },
+    wizard: { phase: 'idle', login: null, loginError: null, agents: [], error: null, done: null, past: { found: null, on: true, scanning: false, asked: false }, share: null, teamsError: null },
+    pastBusy: false,
     agentOp: null,
     sessions: { list: null, loading: false, error: null, query: '', agent: 'all', folder: null },
     confirm: null,
@@ -157,6 +158,7 @@ async function loadStatus({ quiet = false } = {}) {
         state.statusError = null;
     } else state.statusError = friendly(r.error);
     render();
+    watchPast();
 
     return r.ok;
 }
@@ -231,8 +233,43 @@ async function boot() {
         state.view = 'home';
         render();
         checkAccount();
+        return;
     }
+    scanPast();
 }
+
+/**
+ * The past sessions the welcome offers to import, counted on this computer: nothing is sent to count them. Signed in,
+ * the CLI also asks the site whether this account's import is still open (once per account): closed, nothing is offered.
+ * A no said in the terminal comes back unticked.
+ */
+async function scanPast() {
+    const before = state.status?.past_import;
+    if (before && !['declined'].includes(before.status)) return;
+    const past = state.wizard.past;
+    past.scanning = true;
+    render();
+    const r = await call('pastFound');
+    past.scanning = false;
+    if (r.ok && r.result) {
+        past.found = r.result.closed ? null : r.result;
+        if (before?.status === 'declined' && !past.touched) past.on = false;
+    }
+    render();
+}
+
+/** "shop 80, api 41 and 3 more projects", from the projects import-past found. */
+function projectsLine(projects = []) {
+    const named = projects.slice(0, 3).map((p) => `${p.project} ${p.count}`);
+    const rest = projects.length - named.length;
+
+    return rest > 0 ? `${named.join(', ')} and ${rest} more project${rest === 1 ? '' : 's'}` : named.join(', ');
+}
+
+/** The welcome's tick is on and there is something to import. */
+const importingPast = () => state.wizard.past.on && (state.wizard.past.found?.found ?? 0) > 0;
+/** The import was set up by this very welcome (not one from before, which the done event also reports). */
+const pastStarted = (w) => w.past.asked && ['running', 'login'].includes(w.done?.past_import?.status) && w.done.past_import.total > 0;
 
 /* ---------- welcome ---------- */
 
@@ -261,14 +298,81 @@ async function getStarted() {
         w.error = 'No coding agent was found on this computer. Install Claude Code, Codex, Cursor or Pi, then try again.';
         return render();
     }
+    // Signed in now: whether this account may still import (once per account) is known.
+    if (w.past.found && !state.status?.past_import) await scanPast();
     w.phase = 'connect';
+    w.past.asked = importingPast();
     render();
-    const r = await call('connect', { agents }, (e) => onAgentEvent(e, w.agents));
+    const r = await call('connect', { agents, importPast: w.past.asked }, (e) => onAgentEvent(e, w.agents));
     w.phase = 'done';
     if (!r.ok) w.error = friendly(r.error);
     else w.done = r.events.at(-1) ?? null;
     await loadStatus({ quiet: true });
     render();
+    if (pastStarted(w)) await offerTeams();
+}
+
+/**
+ * Right after the import is set up: the sessions that ran in a team's repositories, one team at a time, each ticked
+ * only when auto mode already sends this computer's sessions to that team (import-past teams says so).
+ */
+async function offerTeams() {
+    const w = state.wizard;
+    // Until the teams are known, setup is not over: the question must not be skipped by opening the app.
+    w.phase = 'teams';
+    w.teamsError = null;
+    render();
+    const r = await call('pastTeams');
+    const offers = r.ok ? (r.result?.teams ?? []) : [];
+    if (!r.ok) w.teamsError = friendly(r.error);
+    if (!offers.length) {
+        w.phase = 'done';
+        return render();
+    }
+    w.share = { offers, index: 0, chosen: new Set(offers[0].default ? offers[0].sessions.map((s) => s.id) : []), busy: false, error: null };
+    w.phase = 'share';
+    render();
+}
+
+async function answerTeam(share) {
+    const s = state.wizard.share;
+    const offer = s.offers[s.index];
+    s.busy = true;
+    render();
+    const r = await call('pastShare', { team: offer.slug, sessions: share ? [...s.chosen] : [] });
+    s.busy = false;
+    if (!r.ok) {
+        s.error = friendly(r.error);
+        return render();
+    }
+    if (share && s.chosen.size) toast(`${s.chosen.size} session${s.chosen.size === 1 ? '' : 's'} will go to ${offer.name}`);
+    s.index++;
+    s.error = null;
+    const next = s.offers[s.index];
+    if (next) s.chosen = new Set(next.default ? next.sessions.map((x) => x.id) : []);
+    else state.wizard.phase = 'done';
+    render();
+}
+
+function shareScreen() {
+    const s = state.wizard.share;
+    const offer = s.offers[s.index];
+    const n = offer.sessions.length;
+    const all = s.chosen.size === n;
+
+    return `<div class="card share-team">
+        <h2 class="title">${n === 1 ? 'One of these sessions' : `${Number(n)} of these sessions`} ran in ${esc(offer.name)}’s repositories. Share ${n === 1 ? 'it' : 'them'} with ${esc(offer.name)} too?</h2>
+        <div class="muted small">Ticked ones move to the team’s space once they are imported, and its members see them as they see the team’s other sessions. The rest stay in your private drafts.${offer.default ? ' Ticked because your agents already send this computer’s sessions to the team.' : ''}</div>
+        <label class="share-row all"><input type="checkbox" id="share-all" data-action="share-all" ${all ? 'checked' : ''} ${s.busy ? 'disabled' : ''}><span><strong>All ${Number(n)}</strong></span></label>
+        <ul class="share-list">${offer.sessions
+            .map((x) => `<li><label class="share-row"><input type="checkbox" id="share-${esc(x.id)}" data-action="share-one" data-id="${esc(x.id)}" ${s.chosen.has(x.id) ? 'checked' : ''} ${s.busy ? 'disabled' : ''}><span class="grow"><span class="clip">${esc(x.prompt || 'Session')}</span><span class="faint small">${esc(x.project)} · ${esc(agentName(x.agent))} · ${esc(ago(x.last_active))}</span></span></label></li>`)
+            .join('')}</ul>
+        ${alertHtml('bad', s.error)}
+        <div class="row gap">
+            <button class="btn primary" data-action="share-team" ${s.busy || !s.chosen.size ? 'disabled' : ''}>${s.busy ? '<span class="spinner"></span> ' : ''}Share ${s.chosen.size ? Number(s.chosen.size) : ''} with ${esc(offer.name)}</button>
+            <button class="btn" data-action="keep-private" ${s.busy ? 'disabled' : ''}>Keep them private</button>
+        </div>
+    </div>`;
 }
 
 /** enable's and disable's events, one line per agent. */
@@ -303,7 +407,8 @@ function agentSteps(list) {
 /** The closing notes of enable worth reading: restart, trust the hooks, steps by hand. */
 function todo(done) {
     const restart = (done?.installed ?? []).map((a) => `${a.restart} to load the plugin.`);
-    const notes = (done?.notes ?? []).filter((n) => !/is installed\. /.test(n) && !/^Not signed in/.test(n));
+    // The import of past sessions has its own line on the welcome.
+    const notes = (done?.notes ?? []).filter((n) => !/is installed\. /.test(n) && !/^Not signed in/.test(n) && !/past sessions? (to your private drafts|will go)/.test(n));
 
     return [...restart, ...notes];
 }
@@ -313,14 +418,17 @@ function viewWelcome() {
     const agents = state.status?.agents ?? [];
     const found = agents.filter((a) => a.present);
     const stepClass = (n) => {
-        const order = { idle: 1, login: 2, connect: 3, done: 4 }[w.phase];
+        const order = { idle: 1, login: 2, connect: 3, done: 4, teams: 4, share: 4 }[w.phase];
         if (n === 1) return state.loading ? 'running' : 'done';
         if (n === 2) return w.loginError ? 'failed' : order > 2 ? 'done' : order === 2 ? 'running' : 'pending';
-        return w.phase === 'done' ? (w.error || w.done?.failed?.length ? 'failed' : 'done') : order === 3 ? 'running' : 'pending';
+        return order === 4 ? (w.error || w.done?.failed?.length ? 'failed' : 'done') : order === 3 ? 'running' : 'pending';
     };
     const num = (n) => (stepClass(n) === 'done' ? icon('check', 'sm') : stepClass(n) === 'failed' ? icon('x', 'sm') : n);
-    const busy = w.phase === 'login' || w.phase === 'connect';
+    const busy = w.phase === 'login' || w.phase === 'connect' || w.past.scanning;
+    const setUp = ['done', 'teams', 'share'].includes(w.phase);
     const steps = todo(w.done);
+    const past = w.past.found;
+    const pastDays = past?.days ?? 30;
 
     if (state.init?.cliError) {
         return `<div class="welcome"><div class="welcome-card"><div class="hero">${brand(26)}<h1>KeepPlain could not start</h1></div>
@@ -330,8 +438,8 @@ function viewWelcome() {
     return `<div class="welcome"><div class="welcome-card">
         <div class="hero">
             ${brand(26)}
-            <h1>${w.phase === 'done' && !w.error ? 'You’re all set' : 'Welcome to KeepPlain'}</h1>
-            <p>${w.phase === 'done' && !w.error ? 'KeepPlain now works inside your agents, so you can close this app: nothing needs it running. Open it again to send a session by hand or to change a setting.' : 'Share the AI coding sessions worth learning from. They stay on this computer until you pick one and say yes.'}</p>
+            <h1>${setUp && !w.error ? 'You’re all set' : 'Welcome to KeepPlain'}</h1>
+            <p>${setUp && !w.error ? 'KeepPlain now works inside your agents, so you can close this app: nothing needs it running. Open it again to send a session by hand or to change a setting.' : 'Share the AI coding sessions worth learning from. Nothing leaves this computer until you say yes.'}</p>
         </div>
         <div class="card">
             <ol class="steps">
@@ -365,16 +473,29 @@ function viewWelcome() {
                 </div></li>
             </ol>
         </div>
+        ${
+            past?.found && !setUp
+                ? `<label class="card past-choice"><input type="checkbox" id="past-tick" data-action="past-tick" ${w.past.on ? 'checked' : ''} ${busy ? 'disabled' : ''}><span class="grow">
+                    <span class="title">Import my sessions from the last ${Number(pastDays)} days</span>
+                    <span class="muted small">${Number(past.found)} found: ${esc(projectsLine(past.projects))}. They go to your private drafts, after the secrets the check recognises are redacted on this computer, so your agent can find what you already solved. A team gets only the ones you share with it.</span></span></label>`
+                : ''
+        }
+        ${w.phase === 'teams' ? '<div class="card muted small"><span class="spinner"></span> Checking which of them ran in your teams’ repositories…</div>' : ''}
+        ${w.phase === 'share' ? shareScreen() : ''}
+        ${w.phase === 'done' && w.teamsError ? `<div class="alert warn">${icon('alert', 'sm')}<div class="grow">Could not check your teams: ${esc(w.teamsError)} Your sessions stay private meanwhile. <button class="link" data-action="retry-teams">Try again</button></div></div>` : ''}
+        ${w.phase === 'done' && pastStarted(w) ? `<div class="alert ok">${icon('check', 'sm')}<div class="grow">Importing ${Number(w.done.past_import.total)} past session${w.done.past_import.total === 1 ? '' : 's'} to your private drafts in the background. Home shows how far it got.</div></div>` : ''}
         ${steps.length ? `<div class="alert warn">${icon('alert', 'sm')}<div class="grow"><strong>One more thing</strong><ul>${steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div></div>` : ''}
         ${state.update.state === 'ready' ? `<div class="alert ok">${icon('download', 'sm')}<div class="grow">KeepPlain ${esc(state.update.version)} is ready. <button class="link" data-action="install-update">Restart to update</button></div></div>` : ''}
         <div class="welcome-actions">
             ${
-                w.phase === 'done' && (w.done?.installed?.length || connectedAgents().length)
+                w.phase === 'share' || w.phase === 'teams'
+                    ? ''
+                    : w.phase === 'done' && (w.done?.installed?.length || connectedAgents().length)
                     ? '<button class="btn primary big" data-action="go" data-view="home">Open KeepPlain</button>'
                     : `<button class="btn primary big" data-action="get-started" ${busy || state.loading || !found.length ? 'disabled' : ''}>${busy ? '<span class="spinner"></span> Setting up…' : w.phase === 'done' || w.loginError || w.error ? 'Try again' : 'Get started'}</button>`
             }
         </div>
-        <p class="foot">${icon('shield', 'sm')}<span>Nothing is sent while setting up. <button class="link" data-action="open" data-url="${esc(state.status?.what_leaves ?? 'https://keepplain.com/plugins#what-leaves-your-machine')}">What leaves your computer</button></span></p>
+        <p class="foot">${icon('shield', 'sm')}<span>${setUp && w.past.asked ? 'Your past sessions go to your private drafts; a team gets only the ones you share with it.' : !setUp && importingPast() ? 'Only the past sessions above are sent, to your private drafts.' : 'Nothing is sent while setting up.'} <button class="link" data-action="open" data-url="${esc(state.status?.what_leaves ?? 'https://keepplain.com/plugins#what-leaves-your-machine')}">What leaves your computer</button></span></p>
     </div></div>`;
 }
 
@@ -404,6 +525,7 @@ function viewHome() {
         ${banner}
         <div class="card-head"><p class="eyebrow">Your agents</p><span class="sub">Switch one on to let KeepPlain see its sessions.</span></div>
         <div class="agents">${st.agents.map(agentCard).join('')}</div>
+        ${pastCard(st.past_import)}
         <p class="eyebrow">Last sent</p>
         ${lastSentCard(st.last_sent)}
         <p class="foot">${icon('shield', 'sm')}<span>${whatLeaves()}</span></p>
@@ -448,6 +570,57 @@ function agentCard(a) {
     </div>`;
 }
 
+/** The import of past sessions while it goes (keepplain import-past): how far, why it waits, and Stop. */
+function pastCard(p) {
+    if (!p || !['running', 'login'].includes(p.status) || !p.left) return '';
+    const done = Number(p.sent) + Number(p.skipped) + Number(p.failed);
+    const why = p.status === 'login'
+        ? p.why === 'login' ? 'Your sign-in was not accepted: sign in again and it goes on.' : 'It starts once you sign in.'
+        : p.next_at
+          ? `${p.why === 'daily_limit' ? 'Today’s share is in' : 'KeepPlain could not be reached'}; the rest go on ${esc(new Date(p.next_at).toLocaleString())} or later, when an agent session starts.`
+          : p.active
+            ? 'Oldest first, one every 15 seconds, while your agents work as usual.'
+            : 'It goes on when an agent session starts.';
+    const shared = Number(p.shared) ? `, ${Number(p.shared)} of them shared with a team` : '';
+
+    return `<div class="card"><div class="row">${icon('download')}<div class="grow"><strong>Importing your past sessions: ${done} of ${Number(p.total)}</strong>
+        <div class="small muted">${Number(p.sent)} imported${shared}. ${why}</div></div>
+        <button class="btn" data-action="past-stop" ${state.pastBusy ? 'disabled' : ''}>Stop</button></div></div>`;
+}
+
+async function stopPast() {
+    state.pastBusy = true;
+    render();
+    const r = await call('pastStop');
+    state.pastBusy = false;
+    if (!r.ok) toast(friendly(r.error), 'bad');
+    await loadStatus({ quiet: true });
+}
+
+/**
+ * While the import goes on, Home reads the status every so often; and when it waits for nothing with no runner at work
+ * (after a restart), asking import-past starts it again.
+ */
+let pastTimer = null;
+let pastNudged = false;
+function watchPast() {
+    const p = state.status?.past_import;
+    const going = p && p.status === 'running' && p.left > 0;
+    // Once a window: a runner that cannot start (no sign-in) is not asked again every few seconds.
+    if (going && !p.active && !pastNudged && !(p.next_at && Date.parse(p.next_at) > Date.now())) {
+        pastNudged = true;
+        call('pastFound');
+    }
+    if (going && !pastTimer) {
+        pastTimer = setInterval(() => {
+            if (state.view === 'home' && document.visibilityState === 'visible') loadStatus({ quiet: true });
+        }, 20_000);
+    } else if (!going && pastTimer) {
+        clearInterval(pastTimer);
+        pastTimer = null;
+    }
+}
+
 function lastSentCard(last) {
     if (!last) {
         return `<div class="card"><div class="row">${icon('inbox')}<div class="grow"><strong>Nothing sent yet</strong><div class="small muted">Your first session will show up here.</div></div>
@@ -456,7 +629,7 @@ function lastSentCard(last) {
     const where = last.space?.type === 'team' ? `the ${esc(last.space.name)} team` : last.space?.type === 'personal' ? 'your private drafts' : null;
 
     return `<div class="card"><div class="row">${mark(last.agent ?? 'claude-code')}<div class="grow"><strong>Last sent ${esc(ago(last.at))}</strong>
-        <div class="small muted">${esc(agentName(last.agent ?? 'claude-code'))} session${where ? ` to ${where}` : ''}${last.how === 'auto' ? ', automatically' : ''}</div></div>
+        <div class="small muted">${esc(agentName(last.agent ?? 'claude-code'))} session${where ? ` to ${where}` : ''}${last.how === 'auto' ? ', automatically' : last.how === 'past' ? ', imported from before KeepPlain' : ''}</div></div>
         ${last.url ? `<button class="btn" data-action="open" data-url="${esc(last.url)}">Open draft ${icon('out', 'sm')}</button>` : ''}</div></div>`;
 }
 
@@ -848,11 +1021,14 @@ function render() {
     const active = document.activeElement?.id;
     const caret = active ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     const scroll = root.querySelector('.main')?.scrollTop ?? 0;
+    const listScroll = root.querySelector('.share-list')?.scrollTop ?? 0;
     const views = { home: viewHome, sessions: viewSessions, confirm: viewConfirm, settings: viewSettings };
     const toasts = `<div class="toasts" role="status">${state.toasts.map((t) => `<div class="toast ${t.kind}">${icon(t.kind === 'bad' ? 'alert' : 'check', 'sm')}${esc(t.text)}</div>`).join('')}</div>`;
     root.innerHTML = state.view === 'welcome' ? viewWelcome() + toasts : `<div class="shell">${sidebar()}<main class="main">${views[state.view]()}</main></div>${toasts}`;
     const main = root.querySelector('.main');
     if (main) main.scrollTop = scroll;
+    const list = root.querySelector('.share-list');
+    if (list) list.scrollTop = listScroll;
     if (active) {
         const el = document.getElementById(active);
         if (el && !el.disabled) {
@@ -900,12 +1076,28 @@ document.addEventListener('click', async (event) => {
     else if (action === 'disconnect') disconnect();
     else if (action === 'check-updates') checkUpdates();
     else if (action === 'install-update') call('installUpdate');
+    else if (action === 'past-stop') stopPast();
+    else if (action === 'share-team') answerTeam(true);
+    else if (action === 'retry-teams') offerTeams();
+    else if (action === 'keep-private') answerTeam(false);
 });
 
 document.addEventListener('change', (event) => {
     const el = event.target;
     const { action } = el.dataset ?? {};
     if (action === 'toggle-agent') toggleAgent(el.dataset.agent, el.checked);
+    else if (action === 'past-tick') {
+        state.wizard.past.on = el.checked;
+        state.wizard.past.touched = true;
+        render();
+    } else if (action === 'share-one' || action === 'share-all') {
+        const s = state.wizard.share;
+        const offer = s.offers[s.index];
+        if (action === 'share-all') s.chosen = new Set(el.checked ? offer.sessions.map((x) => x.id) : []);
+        else if (el.checked) s.chosen.add(el.dataset.id);
+        else s.chosen.delete(el.dataset.id);
+        render();
+    }
     else if (action === 'auto') setting('auto', () => call('setAuto', { mode: el.value, agents: connectedAgents().map((a) => a.id) }), 'Saved');
     else if (action === 'rules') setting('rules', () => call('setRules', { on: el.checked }), el.checked ? 'Rules on' : 'Rules off');
     else if (action === 'nudge') setting('nudge', () => call('setNudge', { on: el.checked }), 'Saved');

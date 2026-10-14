@@ -125,7 +125,7 @@ export function parseShortstat(line) {
  * @param folders    [{dir, label}] from addedFolders
  * @param cwd        the session's own folder, whose repository the main context already covers
  */
-export function folderGitContexts(folders, cwd, startedAt) {
+export function folderGitContexts(folders, cwd, startedAt, past = null) {
     const own = cwd ? git(cwd, ['rev-parse', '--show-toplevel']) : null;
     const seen = new Set(own ? [own] : []);
     const contexts = [];
@@ -133,32 +133,39 @@ export function folderGitContexts(folders, cwd, startedAt) {
         const top = git(dir, ['rev-parse', '--show-toplevel']);
         if (!top || seen.has(top) || contexts.length >= 5) continue;
         seen.add(top);
-        const context = gitContext(dir, null, startedAt);
+        const context = gitContext(dir, null, startedAt, past ? { endedAt: past.endedAt } : null);
         if (context) contexts.push({ folder: label, ...context });
     }
 
     return contexts;
 }
 
+/** Commits made this long after a past session's last line still count as its own: the file is written last. */
+export const PAST_END_SLACK_MS = 2 * 60_000;
+
 /**
  * @param cwd        the session's working folder
  * @param headStart  HEAD when the session started (the SessionStart hook), or null
  * @param startedAt  the session's first timestamp in ms, to estimate headStart when the hook did not run
+ * @param past       a session that ended long ago (the import of past sessions, lib/past.mjs): {endedAt} in ms and the
+ *                   {branch} it ran on. HEAD now has the commits of every day since, so its end is the last commit
+ *                   before it ended, on its branch when that is still here
  */
-export function gitContext(cwd, headStart, startedAt) {
+export function gitContext(cwd, headStart, startedAt, past = null) {
     if (!cwd || git(cwd, ['rev-parse', '--is-inside-work-tree']) !== 'true') return null;
 
-    const headEnd = currentHead(cwd);
+    const ref = past?.branch && git(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${past.branch}`]) ? past.branch : 'HEAD';
+    const headEnd = past?.endedAt ? git(cwd, ['rev-list', '-1', `--before=${new Date(past.endedAt + PAST_END_SLACK_MS).toISOString()}`, ref]) || null : currentHead(cwd);
     if (!headEnd) return null;
 
     // Installed mid-session, or the hook could not run: the last commit before the session began is the best guess.
     let estimated = false;
     if (!headStart && startedAt) {
-        headStart = git(cwd, ['rev-list', '-1', `--before=${new Date(startedAt).toISOString()}`, 'HEAD']) || null;
+        headStart = git(cwd, ['rev-list', '-1', `--before=${new Date(startedAt).toISOString()}`, ref]) || null;
         estimated = headStart !== null;
     }
 
-    const branch = git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
+    const branch = past?.branch ?? git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const context = {
         remote: normalizeRemote(git(cwd, ['remote', 'get-url', 'origin'])),
         branch: branch && branch !== 'HEAD' ? branch : null,

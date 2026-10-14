@@ -51,7 +51,7 @@ export function folderSessions(folder, { env = process.env, now = Date.now() } =
  */
 export function allSessions({ env = process.env, now = Date.now(), days = CODEX_DAYS } = {}) {
     const since = now - days * 86_400_000;
-    const found = [...claudeSessions(null, configDir(env), null), ...codexSessions(null, codexHome(env), now, null), ...piSessions(null, env), ...cursorSessions(null, env)].filter((s) => s.mtimeMs >= since);
+    const found = [...claudeSessions(null, configDir(env), null), ...codexSessions(null, codexHome(env), now, null, days), ...piSessions(null, env), ...cursorSessions(null, env)].filter((s) => s.mtimeMs >= since);
     const newest = new Map();
     for (const s of found.sort((a, b) => b.mtimeMs - a.mtimeMs)) if (!newest.has(`${s.agent}:${s.id}`)) newest.set(`${s.agent}:${s.id}`, s);
 
@@ -109,9 +109,9 @@ function claudeSessions(folders, dir, removed) {
         .filter(Boolean);
 }
 
-function codexSessions(folders, dir, now, removed) {
+function codexSessions(folders, dir, now, removed, days = CODEX_DAYS) {
     const inRemoved = (cwd) => removed && normal(cwd).length > removed.length && samePath(normal(cwd).slice(0, removed.length + 1), `${removed}${sep}`);
-    const oldest = new Date(now - CODEX_DAYS * 86_400_000).toISOString().slice(0, 10);
+    const oldest = new Date(now - days * 86_400_000).toISOString().slice(0, 10);
     const found = [];
     const root = join(dir, 'sessions');
     for (const year of files(root)) {
@@ -212,7 +212,8 @@ export function sentUrl(site, id) {
 }
 
 /**
- * Remembered after the send step: the draft's link and when, and where it went ($about: {space, agent}); sends older
+ * Remembered after the send step: the draft's link and when, and where it went ($about: {space, agent, how}: how is
+ * 'past' for the import of past sessions, which leaves it here so a later import never sends it again); sends older
  * than SENT_DAYS are forgotten then.
  */
 export function markSent(site, id, url, now = Date.now(), about = {}) {
@@ -228,13 +229,13 @@ export function markSent(site, id, url, now = Date.now(), about = {}) {
 }
 
 /**
- * The session that left this computer last for $site, by the send step or auto mode: {session_id, agent, at, url, space,
- * how}, or null. space is {type: 'personal'|'team', name} as the site answered; null when an older version sent it.
+ * The session that left this computer last for $site, by the send step, auto mode or the import of past sessions:
+ * {session_id, agent, at, url, space, how: 'manual'|'auto'|'past'}, or null. space is {type: 'personal'|'team', name} as the site answered; null when an older version sent it.
  */
 export function lastSent(site) {
     const manual = Object.entries(readSent()[site] ?? {})
         .filter(([, s]) => typeof s?.at === 'number' && s.url)
-        .map(([id, s]) => ({ session_id: id, agent: s.agent ?? null, at: s.at, url: s.url, space: s.space ?? null, how: 'manual' }));
+        .map(([id, s]) => ({ session_id: id, agent: s.agent ?? null, at: s.at, url: s.url, space: s.space ?? null, how: s.how === 'past' ? 'past' : 'manual' }));
     const auto = Object.entries(autoSessions(site))
         .filter(([, s]) => typeof s?.sent?.at === 'number')
         .map(([id, s]) => ({ session_id: id, agent: s.agent ?? 'claude-code', at: s.sent.at, url: s.sent.url ?? null, space: s.sent.space ?? null, how: 'auto' }));

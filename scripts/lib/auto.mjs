@@ -51,6 +51,8 @@ const BUSY_MS = 2 * 60_000;
 /** Sessions caught up at one start, oldest first; the rest wait for the next one. */
 const CATCH_UP = 3;
 const KEEP_MS = 14 * 86_400_000;
+/** A session the person chose for (own): remembered longer than the import of past sessions can look back (90 days). */
+const OWN_KEEP_MS = 120 * 86_400_000;
 
 const configFile = (dir) => join(dir, 'auto.json');
 const sessionsFile = (dir) => join(dir, 'auto-sessions.json');
@@ -172,14 +174,17 @@ export function autoSession(site, id, dir = home()) {
  *   held      {at, size, why} when it was last not sent for what it held then: no prompts yet, not a repository of a
  *             team that asks for it. Looked at again once the file grows: a prompt comes, a team turns it on
  *   skip      why it is never sent again (published, a draft that is not the person's)
- *   own       'on' or 'off': the person chose for this session (`auto session`), over the computer's mode
+ *   own       'on' or 'off': the person chose for this session (`auto session`), over the computer's mode; kept for
+ *             OWN_KEEP_MS, longer than the import of past sessions looks back, so that never sends a session turned off
+ *   past      true: the import of past sessions sends it (lib/past.mjs), not auto mode, which leaves it alone (catchUp)
+ *             until one of its hooks runs for it again: it goes on, and auto mode follows it from then (past: false)
  */
 export function trackSession(site, id, patch = {}, dir = home(), now = Date.now()) {
     const all = read(sessionsFile(dir));
     const sessions = (all[site] ??= {});
     sessions[id] = { seen: now, ...sessions[id], ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
     for (const [other, s] of Object.entries(sessions)) {
-        if (now - Math.max(s.seen ?? 0, s.tried ?? 0, s.sent?.at ?? 0) > KEEP_MS) delete sessions[other];
+        if (now - Math.max(s.seen ?? 0, s.tried ?? 0, s.sent?.at ?? 0) > (s.own ? OWN_KEEP_MS : KEEP_MS)) delete sessions[other];
     }
     write(sessionsFile(dir), all);
 
@@ -240,7 +245,9 @@ export function syncIfDue(site, id, { path, agent = 'claude-code', args = [] } =
     if (!id || !RUNNING_MODES.includes(sessionAutoMode(site, id, agent, dir, env))) return false;
     let session = autoSession(site, id, dir);
     // Auto mode turned on in the middle of a session starts with it from here.
-    if (!session || (path && session.path !== path) || (session.agent ?? 'claude-code') !== agent) session = trackSession(site, id, { path, agent }, dir, now);
+    if (!session || (path && session.path !== path) || (session.agent ?? 'claude-code') !== agent) session = trackSession(site, id, { path, agent, past: false }, dir, now);
+    // A past session the import sent goes on now: auto mode follows it from here.
+    else if (session.past) session = trackSession(site, id, { past: false }, dir, now);
     if (!syncDue(session, now)) return false;
     trackSession(site, id, { tried: now }, dir, now);
     inBackground(['auto-send', id, '--sync', ...args], env);
@@ -260,7 +267,7 @@ export function catchUp(site, current, agent = 'claude-code', dir = home(), now 
     const sessions = read(sessionsFile(dir))[site] ?? {};
 
     return Object.entries(sessions)
-        .filter(([id, s]) => id !== current && s.path && !settled(s) && (s.agent ?? 'claude-code') === agent)
+        .filter(([id, s]) => id !== current && s.path && !settled(s) && !s.past && (s.agent ?? 'claude-code') === agent)
         .filter(([, s]) => (running ? s.own !== 'off' : s.own === 'on'))
         .map(([id, s]) => ({ id, file: fileStat(s.path), done: doneWith(s) }))
         .filter(({ file, done }) => file && file.size > done && now - file.mtimeMs >= BUSY_MS)

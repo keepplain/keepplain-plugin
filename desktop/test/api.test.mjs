@@ -79,6 +79,14 @@ test('the window cannot slip arguments in: each request checks what it gets and 
 test('every row of the screens is one keepplain command', async () => {
     const { api, calls } = stand();
     await api.connect({ agents: ['claude-code', 'pi', 'emacs'] });
+    await api.connect({ agents: ['codex'], importPast: true });
+    await api.connect({ agents: ['codex'], importPast: 'yes' });
+    await api.pastFound();
+    await api.pastStop();
+    await api.pastTeams();
+    await api.pastShare({ team: 'acme', sessions: ['a1b2c3d4-0000-4000-8000-000000000001'] });
+    assert.equal((await api.pastShare({ team: '--site=x', sessions: [] })).ok, false);
+    assert.equal((await api.pastShare({ team: 'acme', sessions: ['--yes'] })).ok, false);
     await api.setAgent({ agent: 'cursor', on: true });
     await api.setAgent({ agent: 'codex', on: false });
     await api.sessions({ folder: '/work/shop' });
@@ -92,6 +100,12 @@ test('every row of the screens is one keepplain command', async () => {
         calls.map((c) => c.args.join(' ')),
         [
             'enable --yes --agent=claude-code,pi',
+            'enable --yes --agent=codex --import-past',
+            'enable --yes --agent=codex',
+            'import-past',
+            'import-past stop',
+            'import-past teams',
+            'import-past share --team=acme --stdin',
             'enable --yes --agent=cursor',
             'disable --yes --agent=codex',
             'sessions --limit=60',

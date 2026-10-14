@@ -47,12 +47,27 @@ export function createApi({ run, now = Date.now }) {
             return { ok: true };
         },
 
-        /** enable for these agents, each step as an event. */
-        connect({ agents } = {}, onEvent) {
+        /**
+         * enable for these agents, each step as an event. importPast: the person left the welcome's tick on, so their
+         * past sessions go to their private drafts in the background (keepplain import-past); only a true says yes.
+         */
+        connect({ agents, importPast = false } = {}, onEvent) {
             const chosen = Array.isArray(agents) ? agents.filter((a) => AGENTS.includes(a)) : [];
             if (!chosen.length) return refuse('No agent to connect.');
 
-            return run(['enable', '--yes', agentArg(chosen.join(','))], { onEvent, timeoutMs: 10 * 60_000 });
+            return run(['enable', '--yes', agentArg(chosen.join(',')), ...(importPast === true ? ['--import-past'] : [])], { onEvent, timeoutMs: 10 * 60_000 });
+        },
+        /** The past sessions the import would take, by project: nothing is sent. */
+        pastFound: () => run(['import-past'], { timeoutMs: 120_000 }),
+        pastStop: () => run(['import-past', 'stop']),
+        /** The import's sessions in each team's repositories, and whether sharing them is the default. */
+        pastTeams: () => run(['import-past', 'teams'], { timeoutMs: 120_000 }),
+        /** The person's ticks for one team: these sessions go to it, the team's others stay private ([] keeps all). */
+        pastShare({ team, sessions } = {}) {
+            if (!(typeof team === 'string' && TEAM.test(team))) return refuse('That is not one of your teams.');
+            if (!Array.isArray(sessions) || sessions.length > 5000 || sessions.some((id) => typeof id !== 'string' || !SESSION_ID.test(id))) return refuse('Those are not sessions of this computer.');
+
+            return run(['import-past', 'share', `--team=${team}`, '--stdin'], { input: JSON.stringify(sessions), timeoutMs: 120_000 });
         },
         setAgent({ agent, on } = {}, onEvent) {
             if (!AGENTS.includes(agent)) return refuse('Unknown agent.');
