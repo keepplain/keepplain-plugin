@@ -106,6 +106,13 @@ test('the sessions found: with a prompt, quiet, in the window, never sent, each 
     const sidechain = claudeSession(env.CLAUDE_CONFIG_DIR, shop, 'agent-1a2b3c4d', 6 * DAY);
     writeFileSync(sidechain, readFileSync(sidechain, 'utf8').replace(/"type":"user"/, '"isSidechain":true,"type":"user"'));
     utimesSync(sidechain, new Date(Date.now() - 6 * DAY), new Date(Date.now() - 6 * DAY));
+    // Run by programs, not a person: Claude Code from a script (claude -p, the Agent SDK) and Codex's guardian subagent.
+    const scripted = claudeSession(env.CLAUDE_CONFIG_DIR, shop, uuid(11), 6 * DAY);
+    writeFileSync(scripted, readFileSync(scripted, 'utf8').replace(/"type":"user"/, '"entrypoint":"sdk-cli","type":"user"'));
+    utimesSync(scripted, new Date(Date.now() - 6 * DAY), new Date(Date.now() - 6 * DAY));
+    const guardian = codexSession(env.CODEX_HOME, api, uuid(12), 6 * DAY);
+    writeFileSync(guardian, readFileSync(guardian, 'utf8').replace('"git":', '"source":{"subagent":{"other":"guardian"}},"git":'));
+    utimesSync(guardian, new Date(Date.now() - 6 * DAY), new Date(Date.now() - 6 * DAY));
 
     const all = await findPast({ site, agents: ['claude-code', 'codex', 'cursor', 'pi'], env, dir: home });
     assert.deepEqual(all.sessions.map((s) => s.id), [uuid(1), uuid(3), uuid(9), uuid(8), uuid(2)]);

@@ -12,7 +12,9 @@
  *
  *   found      every agent's sessions of the last $days that have a prompt, are quiet for IDLE_MS (a fresher one may
  *              still be going), and were never sent from here (sent.json, auto-sessions.json); each with the folder it
- *              ran in. Cursor's transcripts do not say it: the folder is the one of Cursor's workspaces (its
+ *              ran in. Sessions a program ran, not a person, are left out: Codex's subagents (its "guardian" that
+ *              assesses an action asks a model in a rollout of its own) and Claude Code run by a script (`claude -p`,
+ *              the Agent SDK: entrypoint sdk-*). Cursor's transcripts do not say it: the folder is the one of Cursor's workspaces (its
  *              workspaceStorage) or of another agent's session whose name Cursor's folder name is made from. One whose
  *              folder stays unknown is left out: without it the privacy check cannot tell the project's paths from the rest.
  *   queue      ~/.keepplain/past-import.json, per site: what is left, oldest first, and what happened to the rest; the
@@ -376,21 +378,21 @@ export async function promptLine(session) {
 /**
  * What the person typed first, or null: read up to the first prompt only (rollouts run to hundreds of MB). A subagent's
  * transcript that older Claude Code versions kept beside the sessions (agent-*.jsonl, isSidechain) is the session's
- * that started it, not one of its own.
+ * that started it, not one of its own; a session a program ran (machineMade) has no person's prompt either.
  */
 async function firstPrompt({ agent, path }) {
     const stream = createReadStream(path, 'utf8');
     const lines = createInterface({ input: stream, crlfDelay: Infinity });
     try {
         for await (const line of lines) {
-            if (!line.includes('"user"')) continue;
+            if (!line.includes('"user"') && !line.includes('"session_meta"')) continue;
             let d;
             try {
                 d = JSON.parse(line);
             } catch {
                 continue;
             }
-            if (agent === 'claude-code' && d?.isSidechain === true) return null;
+            if (machineMade(agent, d)) return null;
             const text = promptOf(agent, d);
             if (text) return text;
         }
@@ -402,6 +404,17 @@ async function firstPrompt({ agent, path }) {
     }
 
     return null;
+}
+
+/**
+ * A line that says a program ran the session, not a person: Codex's session_meta of a subagent ({source: {subagent: …}},
+ * the guardian among them), Claude Code's subagent sidechain or a run by a script (entrypoint sdk-cli, sdk-ts, sdk-py).
+ */
+function machineMade(agent, d) {
+    if (agent === 'codex') return d?.type === 'session_meta' && typeof d.payload?.source === 'object' && d.payload.source !== null && 'subagent' in d.payload.source;
+    if (agent === 'claude-code') return d?.isSidechain === true || (typeof d?.entrypoint === 'string' && d.entrypoint.startsWith('sdk'));
+
+    return false;
 }
 
 function promptOf(agent, d) {
