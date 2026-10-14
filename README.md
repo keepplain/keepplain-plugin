@@ -283,6 +283,15 @@ Each network call, and what goes with it:
 | `gh pr view`, `gh pr list`, `gh pr edit` (your GitHub CLI) | `share --pr` after your yes; the share auto mode | The pull request's new description, with the block. Your own GitHub sign-in: the plugin never sees it. |
 | GitHub Releases | `update`, and a background check at most once a day from a terminal | The request for the release, with `keepplain/<version>` as its user agent; nothing about you or your sessions. |
 
+### Credentials the plugin reads
+
+Two kinds, and each goes to one place only:
+
+- **Your KeepPlain token.** Taken, in this order, from `KEEPPLAIN_TOKEN`, the plugin option `token` in Claude Code (`sensitive`, kept in the system keychain; empty unless you paste one), or what `/keepplain:login` saved for that site in `~/.keepplain/credentials.json` (readable by you only). It is KeepPlain's own token and goes only to the KeepPlain site it was issued for, as `Authorization: Bearer …` on the calls in the table above (`scripts/keepplain.mjs`, `scripts/lib/hooks.mjs`). The plugin's MCP server gets it the same way: `.mcp.json` runs `node <plugin>/scripts/keepplain.mjs mcp-headers` at each connection, which prints the header for the server's own site (https://keepplain.com/mcp) and nothing for any other; not signed in, it prints `{}` and the server asks you to sign in through the browser.
+- **A proxy's `user:password`**, when your `HTTPS_PROXY` (or `HTTP_PROXY`, `ALL_PROXY`, or on Windows the manual proxy in Internet Settings) has one. It goes only to that proxy, as `Proxy-Authorization` when the tunnel opens (`scripts/lib/http.mjs`), never to KeepPlain.
+
+Nothing else is read as a credential. Your GitHub sign-in stays with your `gh`, which the plugin runs for `share`; `GH_TOKEN` in `.github/workflows` is the release job's own on GitHub Actions and never reaches your machine. The desktop app reads no token itself: it runs the same `keepplain`. In the tests (`test/`, `desktop/test/`), every token is made up (`ct_kkkk…`) and every home folder is a temporary one.
+
 ## What the plugin keeps on your computer
 
 `~/.keepplain` (or `KEEPPLAIN_HOME`) is readable by you only: the folder and every folder in it 0700, every file 0600 (Windows keeps the user profile private instead).
@@ -318,7 +327,7 @@ The preview writes `<temp folder>/keepplain/<session>.jsonl.gz` and `.json` (a p
 | Setting | Where | Default |
 | --- | --- | --- |
 | Site address | `KEEPPLAIN_URL`, or in Claude Code the plugin option `url` (asked when the plugin is enabled). In Codex set the variable in `~/.codex/config.toml`: `[shell_environment_policy]` `set = { KEEPPLAIN_URL = "https://…" }`. Cursor's hooks and Pi's extension get the environment the agent was started from | `https://keepplain.com` |
-| Token | `/keepplain:login` saves one per site; `KEEPPLAIN_TOKEN` overrides it (for CI, or a token made in Settings by hand) | none |
+| Token | `/keepplain:login` saves one per site; `KEEPPLAIN_TOKEN`, or in Claude Code the plugin option `token` (kept as a secret), overrides it (for CI, or a token made in Settings by hand) | none |
 | Data folder | `KEEPPLAIN_HOME` | `~/.keepplain` |
 | Suggestion to share a session that used the library | `KEEPPLAIN_NUDGE=0` turns it off for a shell; `keepplain.mjs nudge off` for this computer | on |
 | Rules in every session | `KEEPPLAIN_RULES=0` turns them off for a shell; `keepplain rules off` for this computer | on |

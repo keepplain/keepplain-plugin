@@ -1,7 +1,7 @@
 {
     "name": "keepplain",
     "displayName": "KeepPlain",
-    "version": "0.16.8",
+    "version": "0.16.9",
     "description": "Send a Claude Code session to KeepPlain as a draft Build: the prompts, interventions and fails that mattered. You review and publish it on the site. Your agent can also look up how other developers did a similar task in the KeepPlain library, and /keepplain:use puts a published Build's playbook into your repository as a skill or a rule. /keepplain:share puts a published Build into its pull request: how the change was built, for the reviewer.",
     "author": {
         "name": "KeepPlain",
@@ -24,6 +24,13 @@
             "title": "Site address",
             "description": "Leave as it is unless you run your own copy of KeepPlain.",
             "default": "https://keepplain.com",
+            "required": false
+        },
+        "token": {
+            "type": "string",
+            "title": "KeepPlain token",
+            "description": "Leave empty and sign in with /keepplain:login. Paste a token made in KeepPlain's Settings only if you cannot sign in through the browser. It goes to the site above and nowhere else.",
+            "sensitive": true,
             "required": false
         }
     }

@@ -1834,7 +1834,7 @@ function mcpHeaders() {
     try {
         const server = env.CLAUDE_CODE_MCP_SERVER_URL?.replace(/\/mcp\/?$/, '').replace(/\/+$/, '');
         const own = server && /^https?:\/\/\S+$/.test(server) ? server : siteUrl(null, true);
-        const saved = env.KEEPPLAIN_TOKEN || savedToken(own);
+        const saved = env.KEEPPLAIN_TOKEN || env.CLAUDE_PLUGIN_OPTION_TOKEN || savedToken(own);
         if (saved && /^[\x21-\x7e]+$/.test(saved)) headers = { Authorization: `Bearer ${saved}` };
     } catch {
         // No home folder, an unreadable file: no token.
