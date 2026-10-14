@@ -69,11 +69,14 @@ export function keep(hashes) {
     writePrivate(join(home(), 'kept.json'), JSON.stringify({ sha256: all }, null, 2) + '\n');
 }
 
-/** A check with the person's words and kept values; kept values are matched by their hash. */
-export function privacyScan() {
+/**
+ * A check with the person's words and kept values; kept values are matched by their hash. The project's folder (the
+ * repository's root) keeps the paths inside it; every other path is redacted.
+ */
+export function privacyScan(project) {
     const kept = keptHashes();
 
-    return new PrivacyScan({ terms: terms(), keep: (value) => kept.has(sha256(value)) });
+    return new PrivacyScan({ terms: terms(), keep: (value) => kept.has(sha256(value)), project });
 }
 
 /** What goes to the site: counts, and the hashes of the kept values found in this session. Never a value. */

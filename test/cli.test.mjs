@@ -268,7 +268,8 @@ test('preview prints what will go, then send uploads exactly that and waits for 
         preview.out.includes('Git:        https://github.com/mara/shop (linked on the Build only if the repository is public), branch main; 2 commits in this session, 1 file +2 −0. Commit titles are sent, not the commits.'),
         preview.out,
     );
-    assert.match(preview.out, /Privacy check, on this computer: no keys, tokens or addresses it recognises\./);
+    // The session's paths are /home/you/... , not this repository's folder: outside the project, so they are redacted.
+    assert.match(preview.out, /Privacy check, on this computer \(nothing has left yet\):\n {2}#1 path outside the project \(\/hom…\), 2 places: goes as \[REDACTED:PATH\]/);
     assert.match(preview.out, /anything else, a secret in an unusual form or a name you would rather keep, goes as it is/);
     const prepared = join(temp, 'keepplain', `${id}.jsonl.gz`);
     const gz = readFileSync(prepared);
