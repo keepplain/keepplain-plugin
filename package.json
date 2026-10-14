@@ -18,6 +18,7 @@
     "scripts": {
         "test": "node --import ./test/isolate.mjs --test",
         "build": "node scripts/build.mjs",
-        "test:binary": "node scripts/smoke.mjs"
+        "test:binary": "node scripts/smoke.mjs",
+        "test:live": "node --test --test-concurrency=1 live/*.live.mjs"
     }
 }

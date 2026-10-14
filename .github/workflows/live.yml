@@ -1,0 +1,71 @@
+name: Live agents
+
+# The real agents with this plugin (live/, npm run test:live): every night against their latest releases, so a change
+# on their side (a transcript format, a hook that stopped firing) shows here before people meet it, and by hand before
+# a release. Each agent and system is its own job: one that fails hides none of the others.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: live-agents
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: ${{ matrix.agent }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        agent: [claude, codex, pi, cursor]
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - if: matrix.agent == 'claude'
+        run: npm install -g @anthropic-ai/claude-code
+      - if: matrix.agent == 'codex'
+        run: npm install -g @openai/codex
+      - if: matrix.agent == 'pi'
+        run: npm install -g @earendil-works/pi-coding-agent
+      - if: matrix.agent == 'cursor' && runner.os != 'Windows'
+        run: |
+          curl -fsS https://cursor.com/install | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        shell: bash
+      - if: matrix.agent == 'cursor' && runner.os == 'Windows'
+        run: |
+          irm 'https://cursor.com/install?win32=true' | iex
+          Add-Content $env:GITHUB_PATH "$env:LOCALAPPDATA\cursor-agent"
+        shell: pwsh
+
+      - name: Versions
+        shell: bash
+        run: |
+          case "${{ matrix.agent }}" in
+            claude) claude --version ;;
+            codex) codex --version ;;
+            pi) pi --version ;;
+            cursor) (agent --version || cursor-agent --version) ;;
+          esac
+
+      - run: node --test live/${{ matrix.agent }}.live.mjs
+
+      # What each agent printed and its transcript: the first place to look at a failure, and new fixtures.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-${{ matrix.agent }}-${{ matrix.os }}
+          path: live/out/
+          if-no-files-found: ignore
+          retention-days: 14
