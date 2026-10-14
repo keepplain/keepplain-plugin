@@ -113,7 +113,7 @@ import { describeLibrary, LibraryWatch } from './lib/library.mjs';
 import { nudgeOn, setNudge } from './lib/nudge.mjs';
 import { agentName, buildBrief, copyToClipboard, handoffOn, handoffTargets, handoffThreshold, openTerminal, pruneHandoffs, setHandoff, startCommand, writeBrief } from './lib/handoff.mjs';
 import { MEMORY_TOOLS, workContext, memoryArguments } from './lib/work-memory.mjs';
-import { ForkWatch, SESSION_ID, TitleWatch, cutOwnCommand, formatBytes, formatDuration, isCodexPrompt, newestSessionId, promptText, summarize } from './lib/session.mjs';
+import { ForkWatch, SESSION_ID, TitleWatch, cutOwnCommand, formatBytes, formatDuration, isCodexPrompt, newestSessionId, promptText, rolloutFiles, summarize } from './lib/session.mjs';
 import { currentCursorSession, cursorPrompt, readCursorSidecar, withCursorTimes } from './lib/cursor.mjs';
 import { piPrompt } from './lib/pi.mjs';
 import { BUSY_WAIT_MS, byProject, choosePast, describeProjects, findPast, MAX_TRIES, PACE_MS, PAST_DAYS, pastDays, pastDue, pastState, pastSummary, promptLine, queuePast, releaseLock, setPastState, takeLock, teamOffers, touchLock, UNREACHABLE_WAIT_MS } from './lib/past.mjs';
@@ -363,7 +363,9 @@ async function prepare(id, cut = true, past = false) {
     const chain = AGENT.id === 'claude-code' ? await continuationChain(id, path, sidecar?.cwd ?? null) : null;
     const earlier = chain?.sessions ?? [];
     const continued = chain?.continuation ?? null;
-    const session = await readSession(path, id, continued?.inherited, cursorNotes, earlier.map((s) => s.path));
+    // A Codex thread kept in pages (Codex 0.160): the files before the newest, each up to where the next one goes on.
+    const pages = CODEX ? rolloutFiles(path).slice(0, -1) : [];
+    const session = await readSession(path, id, continued?.inherited, cursorNotes, earlier.map((s) => s.path), pages);
     if (session === null) throw new Failure(`This session file is not in the format ${AGENT.name} writes, so it cannot be sent.`);
     // A fork is a fork: its copied lines say so themselves.
     session.continuation = session.fork ? null : continued ? { session_id: continued.session_id, at: continued.at } : session.continuation;
@@ -377,6 +379,7 @@ async function prepare(id, cut = true, past = false) {
     if (gitLines.length) session.code = gitCode(gitLines);
     const stats = summarize(kept, session.cwd);
     if (slim.trim() === '' || stats.prompts === 0) throw new Failure(`There is nothing to send yet: the session has no prompts${cut ? ' before this command' : ''}.`);
+    if (stats.answers === 0) throw new Failure('There is nothing to send yet: the agent never answered in this session.');
 
     const gz = gzipSync(Buffer.from(slim, 'utf8'));
     if (gz.length > MAX_UPLOAD) {
@@ -489,7 +492,7 @@ async function preview(id) {
  * turns and the tokens (lib/cursor.mjs). $before: the files of the sessions this one continued, oldest first (lib/continuation.mjs):
  * read first, as one session with this file's, and a line any of them copied from another is taken once.
  */
-async function readSession(path, id, inherited = null, cursorNotes = null, before = []) {
+async function readSession(path, id, inherited = null, cursorNotes = null, before = [], pages = []) {
     const lines = [];
     const usage = new UsageCounter();
     const fork = new ForkWatch(id);
@@ -506,8 +509,9 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
     let total = 0;
     let parsed = 0;
     const seen = new Set();
-    const files = [...before, path];
-    for (const [n, file] of files.entries()) {
+    // $pages: a Codex thread's earlier files, oldest first, each read up to the ordinal where the next goes on.
+    const files = [...before.map((f) => ({ path: f, until: null })), ...pages, { path, until: null }];
+    for (const [n, { path: file, until }] of files.entries()) {
         const last = n === files.length - 1;
         for await (const line of createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity })) {
             if (line.trim() === '') continue;
@@ -520,6 +524,12 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
             }
             parsed++;
             if (!d || typeof d !== 'object' || Array.isArray(d)) continue;
+            if (pages.length) {
+                // A page's lines from the ordinal the next page goes on at are another way the thread did not take;
+                // each page's own header repeats the thread's.
+                if (until !== null && typeof d.ordinal === 'number' && d.ordinal >= until) continue;
+                if (n > 0 && d.type === 'session_meta') continue;
+            }
             if (before.length) {
                 // Lines the later file copied from the earlier one come once; an earlier file's notes (title) count, its other bare lines do not.
                 if (typeof d.uuid === 'string' && d.uuid) {
@@ -571,7 +581,7 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
         cwd: cwd ?? cursorNotes?.cwd ?? null,
         headStart,
         branch,
-        bytes: files.reduce((sum, f) => sum + statSync(f).size, 0),
+        bytes: files.reduce((sum, f) => sum + statSync(f.path).size, 0),
         usage: usage.result() ?? noted,
         code,
         fork: fork.result(),

@@ -284,6 +284,43 @@ export function appPredecessor(id, env = process.env) {
 }
 
 /** Every session the Claude app says this one continued, oldest first (priorCliSessionIds as written): [] when it says nothing. */
+/**
+ * Every session the Claude app's records name as an earlier session of a conversation that went on in a later one
+ * (priorCliSessionIds), each with that latest session's id: the import of past sessions sends the latest only, which
+ * carries them all. Read once.
+ */
+export function appEarlierLinks(env = process.env) {
+    const dir = appSessionsDir(env);
+    const earlier = new Map();
+    if (!dir || !existsSync(dir)) return earlier;
+    const walk = (folder, depth) => {
+        let entries;
+        try {
+            entries = readdirSync(folder, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const entry of entries) {
+            const path = join(folder, entry.name);
+            if (entry.isDirectory() && depth > 0) walk(path, depth - 1);
+            else if (entry.isFile() && /^local_[\w-]+\.json$/.test(entry.name)) {
+                try {
+                    const meta = JSON.parse(readFileSync(path, 'utf8'));
+                    const latest = typeof meta?.cliSessionId === 'string' ? meta.cliSessionId : null;
+                    for (const p of Array.isArray(meta?.priorCliSessionIds) ? meta.priorCliSessionIds : []) {
+                        if (latest && typeof p === 'string' && SESSION_ID.test(p) && p !== latest) earlier.set(p, latest);
+                    }
+                } catch {
+                    // unreadable, or not the format this was written for
+                }
+            }
+        }
+    };
+    walk(dir, 4);
+
+    return earlier;
+}
+
 export function appPredecessors(id, env = process.env) {
     const dir = appSessionsDir(env);
     if (!dir || !existsSync(dir)) return [];

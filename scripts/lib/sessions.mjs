@@ -18,7 +18,7 @@ import { home, writePrivate } from './credentials.mjs';
 import { projectOf, repositoryRoot, worktrees } from './git.mjs';
 import { cursorSessions, describeCursor, findCursorTranscript } from './cursor.mjs';
 import { describePi, findPiSession, piSessions } from './pi.mjs';
-import { codexHome, configDir, findRollout, findTranscript, isCodexPrompt, promptText } from './session.mjs';
+import { codexHome, configDir, findRollout, findTranscript, isCodexPrompt, promptText, rolloutFiles } from './session.mjs';
 
 const CODEX_DAYS = 30;
 export const SENT_DAYS = 90;
@@ -159,27 +159,31 @@ export async function describeSession({ agent, path }) {
     let prompts = 0;
     let firstPrompt = null;
     let title = null;
-    for await (const line of createInterface({ input: createReadStream(path, 'utf8'), crlfDelay: Infinity })) {
-        if (line.includes('"type":"custom-title"')) {
-            try {
-                const t = JSON.parse(line).customTitle;
-                if (typeof t === 'string' && t.trim()) title = t.replace(/\s*\(fork\)\s*$/i, '').trim();
-            } catch {
-                // a line cut short: the title stays what it was
+    // A Codex thread kept in pages is read as one (lib/session.mjs, rolloutFiles).
+    for (const { path: file, until } of agent === 'codex' ? rolloutFiles(path) : [{ path, until: null }]) {
+        for await (const line of createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity })) {
+            if (line.includes('"type":"custom-title"')) {
+                try {
+                    const t = JSON.parse(line).customTitle;
+                    if (typeof t === 'string' && t.trim()) title = t.replace(/\s*\(fork\)\s*$/i, '').trim();
+                } catch {
+                    // a line cut short: the title stays what it was
+                }
+                continue;
             }
-            continue;
+            if (!line.includes(marker)) continue;
+            let d;
+            try {
+                d = JSON.parse(line);
+            } catch {
+                continue;
+            }
+            if (until !== null && typeof d.ordinal === 'number' && d.ordinal >= until) continue;
+            const text = agent === 'codex' ? codexPrompt(d) : claudePrompt(d);
+            if (text === null) continue;
+            prompts++;
+            firstPrompt ??= text.replace(/\s+/g, ' ').trim();
         }
-        if (!line.includes(marker)) continue;
-        let d;
-        try {
-            d = JSON.parse(line);
-        } catch {
-            continue;
-        }
-        const text = agent === 'codex' ? codexPrompt(d) : claudePrompt(d);
-        if (text === null) continue;
-        prompts++;
-        firstPrompt ??= text.replace(/\s+/g, ' ').trim();
     }
 
     return { prompts, firstPrompt, title };

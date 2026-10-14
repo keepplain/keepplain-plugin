@@ -119,6 +119,8 @@ test('the summary counts prompts typed by the person, tool calls and the time sp
         project: 'shop',
         prompts: 3,
         toolCalls: 2,
+        // The agent's lines: a session with prompts and none of these never got an answer.
+        answers: 1,
         startedAt: Date.parse('2026-09-01T10:00:00Z'),
         durationSec: 2700,
     });
@@ -177,6 +179,8 @@ test('in Codex the skill message and what the person typed to call it are cut', 
         // "$keepplain:build" calls the plugin: not a prompt.
         prompts: 1,
         toolCalls: 2,
+        // Two calls and an answer.
+        answers: 3,
         startedAt: Date.parse('2026-09-01T10:00:00Z'),
         durationSec: 240,
     });

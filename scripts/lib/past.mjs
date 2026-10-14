@@ -14,7 +14,10 @@
  *              still be going), and were never sent from here (sent.json, auto-sessions.json); each with the folder it
  *              ran in. Sessions a program ran, not a person, are left out: Codex's subagents (its "guardian" that
  *              assesses an action asks a model in a rollout of its own) and Claude Code run by a script (`claude -p`,
- *              the Agent SDK: entrypoint sdk-*). Cursor's transcripts do not say it: the folder is the one of Cursor's workspaces (its
+ *              the Agent SDK: entrypoint sdk-*). So are those the agent never answered in (stopped at once), and the
+ *              earlier sessions of a Claude app conversation whose latest is still here (the app's own record,
+ *              priorCliSessionIds): the latest one carries the whole conversation, sent once. A Codex thread is read
+ *              as its pages (rolloutFiles). Cursor's transcripts do not say it: the folder is the one of Cursor's workspaces (its
  *              workspaceStorage) or of another agent's session whose name Cursor's folder name is made from. One whose
  *              folder stays unknown is left out: without it the privacy check cannot tell the project's paths from the rest.
  *   queue      ~/.keepplain/past-import.json, per site: what is left, oldest first, and what happened to the rest; the
@@ -42,7 +45,8 @@ import { home, writePrivate } from './credentials.mjs';
 import { cursorPrompt, cursorSlug } from './cursor.mjs';
 import { projectOf, repositoryRoot } from './git.mjs';
 import { piPrompt } from './pi.mjs';
-import { isCodexPrompt, promptText, SESSION_ID } from './session.mjs';
+import { appEarlierLinks } from './continuation.mjs';
+import { isCodexPrompt, promptText, rolloutFiles, SESSION_ID } from './session.mjs';
 import { allSessions, sentAt, sessionCwd } from './sessions.mjs';
 
 export const PAST_DAYS = 30;
@@ -167,9 +171,14 @@ function lockHeld(dir, now) {
  */
 export async function findPast({ site, agents, days = PAST_DAYS, env = process.env, now = Date.now(), dir = home() }) {
     const known = autoSessions(site, dir);
-    const candidates = allSessions({ env, now, days })
+    const all = allSessions({ env, now, days })
         .filter((s) => agents.includes(s.agent) && SESSION_ID.test(s.id) && now - s.mtimeMs >= IDLE_MS)
         .filter((s) => !known[s.id] && !sentAt(site, s.id));
+    // Claude app conversations: an earlier session goes inside the latest one, when that one goes too or went already.
+    const earlier = agents.includes('claude-code') ? appEarlierLinks(env) : new Map();
+    const going = new Set(all.map((s) => s.id));
+    const carried = (id) => earlier.has(id) && (going.has(earlier.get(id)) || known[earlier.get(id)] || sentAt(site, earlier.get(id)));
+    const candidates = all.filter((s) => !(s.agent === 'claude-code' && carried(s.id)));
 
     const withCwd = candidates.map((s) => ({ ...s, cwd: s.agent === 'cursor' ? null : sessionCwd(s) }));
     // Cursor's folder names, matched against the folders Cursor and the other agents worked in: only with Cursor
@@ -376,34 +385,51 @@ export async function promptLine(session) {
 }
 
 /**
- * What the person typed first, or null: read up to the first prompt only (rollouts run to hundreds of MB). A subagent's
- * transcript that older Claude Code versions kept beside the sessions (agent-*.jsonl, isSidechain) is the session's
- * that started it, not one of its own; a session a program ran (machineMade) has no person's prompt either.
+ * What the person typed first, or null: read up to the first prompt and the agent's first answer only (rollouts run to
+ * hundreds of MB). A subagent's transcript that older Claude Code versions kept beside the sessions (agent-*.jsonl,
+ * isSidechain) is the session's that started it, not one of its own; a session a program ran (machineMade) has no
+ * person's prompt either, and one the agent never answered in has nothing to keep. A Codex thread is read as its pages.
  */
 async function firstPrompt({ agent, path }) {
-    const stream = createReadStream(path, 'utf8');
-    const lines = createInterface({ input: stream, crlfDelay: Infinity });
-    try {
-        for await (const line of lines) {
-            if (!line.includes('"user"') && !line.includes('"session_meta"')) continue;
-            let d;
-            try {
-                d = JSON.parse(line);
-            } catch {
-                continue;
+    let prompt = null;
+    for (const { path: file, until } of agent === 'codex' ? rolloutFiles(path) : [{ path, until: null }]) {
+        const stream = createReadStream(file, 'utf8');
+        const lines = createInterface({ input: stream, crlfDelay: Infinity });
+        try {
+            for await (const line of lines) {
+                if (!/"(user|assistant|session_meta|function_call|custom_tool_call|local_shell_call)"/.test(line)) continue;
+                let d;
+                try {
+                    d = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (until !== null && typeof d?.ordinal === 'number' && d.ordinal >= until) break;
+                if (machineMade(agent, d)) return null;
+                prompt ??= promptOf(agent, d) || null;
+                if (prompt && answerOf(agent, d)) return prompt;
             }
-            if (machineMade(agent, d)) return null;
-            const text = promptOf(agent, d);
-            if (text) return text;
+        } catch {
+            return null;
+        } finally {
+            lines.close();
+            stream.destroy();
         }
-    } catch {
-        return null;
-    } finally {
-        lines.close();
-        stream.destroy();
     }
 
     return null;
+}
+
+/** A line of the agent's own: its answer, or a call it made. */
+function answerOf(agent, d) {
+    if (agent === 'codex') {
+        const p = d?.type === 'response_item' ? d.payload : null;
+        return (p?.type === 'message' && p.role === 'assistant') || ['function_call', 'custom_tool_call', 'local_shell_call'].includes(p?.type);
+    }
+    if (agent === 'pi') return d?.type === 'message' && d.message?.role === 'assistant';
+    if (agent === 'cursor') return d?.role === 'assistant';
+
+    return d?.type === 'assistant';
 }
 
 /**

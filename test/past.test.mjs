@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -12,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { cursorSlug } from '../scripts/lib/cursor.mjs';
 import { gitContext } from '../scripts/lib/git.mjs';
+import { rolloutFiles } from '../scripts/lib/session.mjs';
 import { catchUp, trackSession } from '../scripts/lib/auto.mjs';
 import { byProject, describeProjects, findPast, pastDays, pastDue, pastState, queuePast, releaseLock, setPastState, takeLock, teamOffers, touchLock } from '../scripts/lib/past.mjs';
 import { coders, makeRepo, waitFor } from './helpers.mjs';
@@ -22,14 +24,14 @@ const HOUR = 3_600_000;
 const uuid = (n) => `a1b2c3d4-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
 /** A Claude Code transcript in $config's projects folder that ran in $cwd, last written $agoMs ago. */
-function claudeSession(config, cwd, id, agoMs, { prompt = 'Add a limiter to the login route', branch = 'main' } = {}) {
+function claudeSession(config, cwd, id, agoMs, { prompt = 'Add a limiter to the login route', branch = 'main', answered = true } = {}) {
     const folder = join(config, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
     mkdirSync(folder, { recursive: true });
     const at = Date.now() - agoMs;
     const lines = [
         { type: 'user', cwd, gitBranch: branch, sessionId: id, timestamp: new Date(at - 10 * 60_000).toISOString(), message: { role: 'user', content: prompt } },
         { type: 'assistant', cwd, gitBranch: branch, sessionId: id, timestamp: new Date(at - 5 * 60_000).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'Done: the limiter is keyed by email.' }] } },
-    ].filter((l) => prompt !== null || l.type !== 'user');
+    ].filter((l) => (prompt !== null || l.type !== 'user') && (answered || l.type !== 'assistant'));
     if (prompt === null) lines.unshift({ type: 'summary', summary: 'nothing' });
     const path = join(folder, `${id}.jsonl`);
     writeFileSync(path, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
@@ -106,6 +108,8 @@ test('the sessions found: with a prompt, quiet, in the window, never sent, each 
     const sidechain = claudeSession(env.CLAUDE_CONFIG_DIR, shop, 'agent-1a2b3c4d', 6 * DAY);
     writeFileSync(sidechain, readFileSync(sidechain, 'utf8').replace(/"type":"user"/, '"isSidechain":true,"type":"user"'));
     utimesSync(sidechain, new Date(Date.now() - 6 * DAY), new Date(Date.now() - 6 * DAY));
+    // A prompt the agent never answered (stopped at once): nothing to keep.
+    claudeSession(env.CLAUDE_CONFIG_DIR, shop, uuid(13), 6 * DAY, { answered: false });
     // Run by programs, not a person: Claude Code from a script (claude -p, the Agent SDK) and Codex's guardian subagent.
     const scripted = claudeSession(env.CLAUDE_CONFIG_DIR, shop, uuid(11), 6 * DAY);
     writeFileSync(scripted, readFileSync(scripted, 'utf8').replace(/"type":"user"/, '"entrypoint":"sdk-cli","type":"user"'));
@@ -168,6 +172,62 @@ test("a past session's commits end where it ended, not at today's HEAD", () => {
     assert.equal(past.branch, 'main');
     // A branch that is not here any more: HEAD's history.
     assert.equal(gitContext(dir, null, started, { endedAt: Date.parse('2026-09-01T10:20:00Z'), branch: 'gone' }).head_end, hashes[1]);
+});
+
+test('a Claude app conversation goes once, as its latest session, when that one goes too', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ct-past-chain-'));
+    const folder = join(root, 'shop');
+    mkdirSync(folder);
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex'), KEEPPLAIN_CLAUDE_APP_DIR: join(root, 'app') };
+    const home = join(root, 'ct');
+    mkdirSync(home);
+    mkdirSync(join(root, 'app', 'acct', 'org'), { recursive: true });
+    for (const [n, ago] of [[1, 9], [2, 8], [3, 7], [4, 6], [5, 5]]) claudeSession(env.CLAUDE_CONFIG_DIR, folder, uuid(n), ago * DAY);
+    // 1 → 2 → 3 is one conversation, 3 its latest; 4 continued 9, which is not on this computer any more.
+    writeFileSync(join(root, 'app', 'acct', 'org', 'local_a.json'), JSON.stringify({ cliSessionId: uuid(3), priorCliSessionIds: [uuid(1), uuid(2)] }));
+    writeFileSync(join(root, 'app', 'acct', 'org', 'local_b.json'), JSON.stringify({ cliSessionId: uuid(9), priorCliSessionIds: [uuid(4)] }));
+
+    const { sessions } = await findPast({ site: 'https://keepplain.test', agents: ['claude-code'], env, dir: home });
+    assert.deepEqual(sessions.map((s) => s.id), [uuid(3), uuid(4), uuid(5)]);
+});
+
+test('a Codex thread kept in pages (Codex 0.160) is read as one, without the way it did not take', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ct-past-pages-'));
+    const codex = join(root, 'codex');
+    const day = join(codex, 'sessions', '2026', '10', '11');
+    mkdirSync(day, { recursive: true });
+    const thread = '01a129fa-b861-7851-bc4a-b64436105f42';
+    const page = '01a12c27-1b70-7782-99a2-bcd1470c7e77';
+    const cwd = makeRepo().dir;
+    const line = (ordinal, type, payload, at) => JSON.stringify({ timestamp: at, ordinal, type, payload });
+    const say = (role, text) => ({ type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] });
+    const base = join(day, `rollout-2026-10-11T11-00-59-${thread}.jsonl`);
+    writeFileSync(base, [
+        line(0, 'session_meta', { id: thread, cwd, history_mode: 'paginated', git: { branch: 'main' } }, '2026-10-11T08:00:59Z'),
+        line(1, 'response_item', say('user', 'Fix the flaky queue test'), '2026-10-11T08:01:00Z'),
+        line(2, 'response_item', say('assistant', 'Fixed the timing.'), '2026-10-11T08:02:00Z'),
+        // From here the thread went another way: the page goes on from ordinal 3.
+        line(3, 'response_item', say('user', 'Abandoned branch prompt'), '2026-10-11T08:03:00Z'),
+        line(4, 'response_item', say('assistant', 'Abandoned answer'), '2026-10-11T08:04:00Z'),
+    ].join('\n') + '\n');
+    const next = join(day, `rollout-2026-10-11T21-08-42-${thread}_${page}.jsonl`);
+    writeFileSync(next, [
+        line(0, 'session_meta', { id: thread, cwd, history_mode: 'paginated', history_base: { thread_id: thread, end_ordinal_exclusive: 3, end_byte_offset: 10 } }, '2026-10-11T18:08:42Z'),
+        line(3, 'response_item', say('user', 'Now cover it with a test'), '2026-10-11T18:09:00Z'),
+        line(4, 'response_item', say('assistant', 'Added the test.'), '2026-10-11T18:10:00Z'),
+    ].join('\n') + '\n');
+    utimesSync(base, new Date('2026-10-11T08:05:00Z'), new Date('2026-10-11T08:05:00Z'));
+
+    assert.deepEqual(rolloutFiles(next, codex), [{ path: base, until: 3 }, { path: next, until: null }]);
+    assert.deepEqual(rolloutFiles(base, codex), [{ path: base, until: null }]);
+
+    const out = await run(...coders(['preview', thread, '--agent=codex', '--whole', '--json']), { env: { ...process.env, CODEX_HOME: codex, KEEPPLAIN_HOME: join(root, 'ct'), KEEPPLAIN_URL: 'http://127.0.0.1:9' }, cwd: root });
+    const preview = JSON.parse(out.stdout.trim().split('\n').pop());
+    assert.equal(preview.prompts, 2, 'Both pages, without the prompt of the way the thread did not take.');
+    const sent = gunzipSync(readFileSync(join(tmpdir(), 'keepplain', `${thread}.jsonl.gz`))).toString('utf8');
+    assert.match(sent, /Fix the flaky queue test/);
+    assert.match(sent, /Now cover it with a test/);
+    assert.doesNotMatch(sent, /Abandoned/);
 });
 
 /* ---- the runner, against a stand-in site ---- */
