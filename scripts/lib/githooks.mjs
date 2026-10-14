@@ -20,7 +20,7 @@
  * hooks are not put there, and enable prints the lines to add instead.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { agentArgs } from './agent.mjs';
 import { inBackground, sessionAutoMode } from './auto.mjs';
@@ -133,21 +133,43 @@ export function runGitHook(kind, args, { site, input = '' } = {}) {
 
 /** prepare-commit-msg <file> [source] [sha] */
 function addTrailers(root, [file, source]) {
-    if (!file || ['merge', 'squash'].includes(source)) return;
+    if (!file || ['merge', 'squash'].includes(source) || replaying(root)) return;
     const ids = sessionsBehindCommit(root);
     if (!ids.length) return;
     git(root, ['interpret-trailers', '--in-place', '--if-exists', 'addIfDifferent', ...ids.flatMap((id) => ['--trailer', `${TRAILER}: ${id}`]), resolve(root, file)]);
 }
 
 /**
+ * Git is replaying commits that are someone's already (a rebase, a cherry-pick, git am) or committing a squash merge
+ * with -m: it runs this hook for each, with the source "message", and the work is the original commits'. Whoever runs
+ * the command did not make it, and a trailer would rewrite another person's message.
+ */
+function replaying(root) {
+    return ['rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'sequencer', 'SQUASH_MSG'].some((name) => {
+        const path = git(root, ['rev-parse', '--git-path', name]);
+
+        return Boolean(path) && existsSync(resolve(root, path));
+    });
+}
+
+/**
  * The agent session running this commit: Claude Code, Codex and Pi put their session's id in the environment of the
  * commands they run, and git runs the hook inside that command. Null in the person's own terminal, an IDE, or Cursor,
  * which tells its commands nothing.
+ *
+ * An id is inherited too: a terminal an agent opened (keepplain handoff --open), another agent started from its shell.
+ * A session whose snapshots say its agent is not answering (the last one is not a prompt) runs no command now, so the
+ * commit is not its; the next agent's id is tried.
  */
-export function committingSession(env = process.env) {
-    const id = env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID || env.CODEX_THREAD_ID || env.PI_SESSION_ID;
+export function committingSession(env = process.env, dir = snapshotDir()) {
+    for (const id of [env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID, env.CODEX_THREAD_ID, env.PI_SESSION_ID]) {
+        if (!SESSION_ID.test(id ?? '')) continue;
+        const state = readSnapshots(id, dir);
+        const last = state?.snapshots?.[state.snapshots.length - 1];
+        if (!last || state.disabled || last.kind === 'prompt') return id;
+    }
 
-    return SESSION_ID.test(id ?? '') ? id : null;
+    return null;
 }
 
 /** The sessions whose work this commit holds. */
@@ -156,7 +178,7 @@ export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.
     if (!staged.size) return [];
     // An agent's commit is its session's alone. The snapshots cannot say whose a change is: a session working beside
     // another in the same folder sees the other's edits in its own, and one of them may have stopped taking snapshots.
-    const committer = committingSession(env);
+    const committer = committingSession(env, dir);
     if (committer) return [committer];
     const since = Number(git(root, ['log', '-1', '--format=%ct'])) * 1000 || 0;
     // When a path was last committed: a change the agent made before that is in history already.

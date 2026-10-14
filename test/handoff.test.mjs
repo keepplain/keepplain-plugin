@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildBrief, codexLimits, handoffDue, handoffMessage, handoffOn, handoffThreshold, nearLimit, setHandoff, startCommand, windowLabel } from '../scripts/lib/handoff.mjs';
+import { buildBrief, codexLimits, handoffDue, handoffMessage, handoffOn, handoffThreshold, nearLimit, setHandoff, startCommand, terminalEnv, windowLabel } from '../scripts/lib/handoff.mjs';
 import { codexShowsMessages, keepUnsaid, showsMessages, takeUnsaid, unsaidContext } from '../scripts/lib/unsaid.mjs';
 import { coders, hookCommand } from './helpers.mjs';
 
@@ -246,4 +246,9 @@ test('Cursor says the kept lines through postToolUse, Pi for one run of its prom
     const out = JSON.parse(run('pi', 'prompt', { session_id: pi, cwd: dir, prompt: 'hi' }));
     assert.match(out.unsaidContext, /> KeepPlain: for Pi/);
     assert.equal(out.hookSpecificOutput, undefined, 'not among the rules Pi keeps in every run');
+});
+
+test('the terminal handoff opens is not the session that opened it: the agent variables stay behind', () => {
+    const env = terminalEnv({ PATH: '/bin', HOME: '/home/mara', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'a', CODEX_THREAD_ID: 'b', PI_SESSION_ID: 'c', CURSOR_AGENT: '1' });
+    assert.deepEqual(env, { PATH: '/bin', HOME: '/home/mara' });
 });

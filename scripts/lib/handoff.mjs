@@ -201,22 +201,34 @@ export function copyToClipboard(text, platform = process.platform) {
     return false;
 }
 
+/** What an agent tells the commands it runs about itself: a window opened from one is not that agent's session. */
+const AGENT_VARIABLES = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CODEX_THREAD_ID', 'PI_SESSION_ID', 'PI_SESSION_FILE', 'CURSOR_AGENT', 'CURSOR_TRACE_ID', 'CURSOR_TRANSCRIPT_PATH'];
+
+/**
+ * The environment of the terminal handoff opens, without the agent's own variables: the next agent and the person in
+ * that window are not the session that opened it (a commit there would get its Agent-Session trailer).
+ */
+export function terminalEnv(env = process.env) {
+    return Object.fromEntries(Object.entries(env).filter(([name]) => !AGENT_VARIABLES.includes(name)));
+}
+
 /** Opens a terminal window that runs the target with the brief; best effort, false when no way was found. */
 export function openTerminal(target, file, cwd, platform = process.platform) {
     const command = startCommand(target, file, platform);
     if (!command) return false;
+    const env = terminalEnv();
     try {
         if (platform === 'win32') {
-            const run = spawnSync('cmd', ['/c', 'start', '""', 'powershell', '-NoExit', '-Command', `Set-Location '${cwd.replace(/'/g, "''")}'; ${command}`], { stdio: 'ignore', windowsHide: true, timeout: 5000 });
+            const run = spawnSync('cmd', ['/c', 'start', '""', 'powershell', '-NoExit', '-Command', `Set-Location '${cwd.replace(/'/g, "''")}'; ${command}`], { stdio: 'ignore', windowsHide: true, timeout: 5000, env });
             return run.status === 0;
         }
         const shell = `cd '${cwd.replace(/'/g, `'\\''`)}' && ${command}`;
         if (platform === 'darwin') {
             const script = `tell application "Terminal" to do script "${shell.replace(/[\\"]/g, '\\$&')}"`;
-            return spawnSync('osascript', ['-e', script], { stdio: 'ignore', timeout: 5000 }).status === 0;
+            return spawnSync('osascript', ['-e', script], { stdio: 'ignore', timeout: 5000, env }).status === 0;
         }
         for (const [program, args] of [['x-terminal-emulator', ['-e']], ['gnome-terminal', ['--']], ['konsole', ['-e']], ['xterm', ['-e']]]) {
-            const run = spawnSync(program, [...args, 'sh', '-c', shell], { stdio: 'ignore', timeout: 5000, detached: true });
+            const run = spawnSync(program, [...args, 'sh', '-c', shell], { stdio: 'ignore', timeout: 5000, detached: true, env });
             if (run.status === 0) return true;
         }
     } catch {

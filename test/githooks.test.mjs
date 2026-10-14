@@ -136,6 +136,52 @@ test("an agent's commit names its own session, not another that worked in the sa
     assert.equal(message(repo.dir), `Limiter by email\n\nAgent-Session: ${agent}`);
 });
 
+test("commits git replays for an agent keep their own messages: rebase, cherry-pick, a squash merge", () => {
+    const repo = makeRepo();
+    installHooks(hooksOf(repo.dir), program);
+    const agentEnv = { ...env, CLAUDE_CODE_SESSION_ID: 'a1b2c3d4-0000-4000-8000-0000000000e2' };
+    const run = (e, ...args) => execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd: repo.dir, env: e, stdio: 'ignore' });
+    const base = git(repo.dir, 'rev-parse', '--abbrev-ref', 'HEAD');
+    run(env, 'checkout', '-q', '-b', 'feat');
+    writeFileSync(join(repo.dir, 'feat.txt'), 'by the person\n');
+    run(env, 'add', 'feat.txt');
+    run(env, 'commit', '-q', '-m', 'Person');
+    run(env, 'checkout', '-q', base);
+    writeFileSync(join(repo.dir, 'main.txt'), 'main moves\n');
+    run(env, 'add', 'main.txt');
+    run(env, 'commit', '-q', '-m', 'Main');
+
+    // The agent rebases the person's branch: the person's commit is not its work.
+    run(env, 'checkout', '-q', 'feat');
+    run(agentEnv, 'rebase', '-q', base);
+    assert.equal(message(repo.dir), 'Person');
+    // It cherry-picks it, or squashes the branch into one commit of its own message.
+    run(env, 'checkout', '-q', base);
+    run(agentEnv, 'cherry-pick', 'feat');
+    assert.equal(message(repo.dir), 'Person');
+    run(env, 'reset', '-q', '--hard', 'HEAD~1');
+    run(agentEnv, 'merge', '-q', '--squash', 'feat');
+    run(agentEnv, 'commit', '-q', '-m', 'Squashed');
+    assert.equal(message(repo.dir), 'Squashed');
+});
+
+test("an agent's id the commit inherited is not its session while that agent is not answering", () => {
+    const repo = makeRepo();
+    const dir = join(home, 'ct', 'snapshots');
+    const claude = 'a1b2c3d4-0000-4000-8000-0000000000e3';
+    const codex = 'a1b2c3d4-0000-4000-8000-0000000000e4';
+    const snap = (kind) => takeSnapshot({ session_id: claude, cwd: repo.dir }, kind, { dir, budgetMs: SLOW_OK });
+    writeFileSync(join(repo.dir, 'app.txt'), 'changed\n');
+    git(repo.dir, 'add', 'app.txt');
+    // Claude's answer is going: its command commits.
+    snap('start');
+    snap('prompt');
+    assert.deepEqual(sessionsBehindCommit(repo.dir, { dir, env: { ...env, CLAUDE_CODE_SESSION_ID: claude, CODEX_THREAD_ID: codex } }), [claude]);
+    // Its answer is over, and the terminal it opened (handoff) runs Codex: Codex's commit.
+    snap('stop');
+    assert.deepEqual(sessionsBehindCommit(repo.dir, { dir, env: { ...env, CLAUDE_CODE_SESSION_ID: claude, CODEX_THREAD_ID: codex } }), [codex]);
+});
+
 test('a push finds the sessions behind it: a line without auto mode, a send in push mode, and never a failed push', async () => {
     const id = ids.push;
     const repo = repoWithSession(id);
