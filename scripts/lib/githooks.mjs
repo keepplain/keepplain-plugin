@@ -20,7 +20,7 @@
  * hooks are not put there, and enable prints the lines to add instead.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { agentArgs } from './agent.mjs';
 import { inBackground, sessionAutoMode } from './auto.mjs';
@@ -259,7 +259,15 @@ export function sessionsBehindPush(root, remote, input, { dir = snapshotDir() } 
     return [...ids].map((id) => ({ id, agent: agentOfSession(id) })).filter((s) => s.agent);
 }
 
-const samePath = (a, b) => (process.platform === 'win32' ? resolve(a).toLowerCase() === resolve(b).toLowerCase() : resolve(a) === resolve(b));
+// Through symlinks: git names a repository by its real path (macOS's /var is /private/var), a caller may not.
+const realPath = (path) => {
+    try {
+        return realpathSync.native(path);
+    } catch {
+        return resolve(path);
+    }
+};
+const samePath = (a, b) => (process.platform === 'win32' ? realPath(a).toLowerCase() === realPath(b).toLowerCase() : realPath(a) === realPath(b));
 const lines = (text, separator = '\n') => (text ?? '').split(separator).map((l) => l.trim()).filter(Boolean);
 
 function read(path) {
