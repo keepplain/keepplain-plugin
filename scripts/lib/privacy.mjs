@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/privacyScan.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:19290f4207cff070958e7989ad1abb1d9e5dfcd0054a9f5fac7f748c6890e993
+// sha256:6c21ebe3c68bb9dc2fcd2e139ed0e48e454ec56c9d0c201888204aa3c200d60f
 
 /**
  * The privacy check that runs where the session lives (plan: local-first privacy, stage 2): in the browser before an
@@ -10,9 +10,8 @@
  *
  * The rules are App\Services\Import\SecretScanner's, in the same order, run over the same strings the server's
  * TurnParser reads (the string values of each slimmed line). The server runs its own copy again and redacts anything
- * this one missed for good, without keeping the value. Three more rules exist only here: a path outside the project
- * folder becomes [REDACTED:PATH] (a path inside it stays), a home folder in a path becomes ~, and the person's own list
- * of words (client names, internal services) is redacted as TERM.
+ * this one missed for good, without keeping the value. Two more rules exist only here: a home folder in a path
+ * becomes ~, and the person's own list of words (client names, internal services) is redacted as TERM.
  *
  * "Send it as it is" for a finding is decided here too. Only a SHA-256 of such a value goes to the server, so its
  * scanner leaves the value alone.
@@ -51,38 +50,9 @@ const IGNORED_EMAIL = /^(?:git|[^@]*no-?reply)@|@users\.noreply\./i;
  * A home folder names the person: C:\Users\ann, /Users/ann, /home/ann become ~. Doubled backslashes are JSON inside a
  * string. Folder names that are nobody's (Public, Shared, the CI runner) stay.
  */
-const HOME = /(?<![\w.:/\\~…-])(?:[A-Za-z]:)?(?:\\{1,2}|\/)(?:Users|home)(?:\\{1,2}|\/)(?!(?:Public|Shared|Default|runner|you|user|username|me|example)(?:[\\/"'\s]|$))[^\\/\s"'`:*?<>|]+/g;
-/**
- * A path names the person's machine: C:\code\shop, D:/work, /Users/ann/code, /opt/app become [REDACTED:PATH] unless
- * they are inside the project. A Unix path is one under a machine's own folders, so /api/login in a prompt stays. A
- * path starts after a space, a quote, a bracket or the start of the text: the /path after a URL's host is not one, and
- * neither is a shortened "…/folder/file" from the slimming (lib/slim.mjs). A relative path (src/a.ts) is inside any
- * project. The end is a letter, digit or closing mark, not a dot.
- */
-const PATH = /(?<![\w:/\\])[A-Za-z]:(?:\\{1,2}|\/)(?:[^\s"'`<>|*?]*[^\s"'`<>|*?.,;:)\]])?|(?<![\w.:/\\~…-])\/(?:[A-Za-z](?=\/)|Users|home|root|opt|var|etc|usr|tmp|private|srv|mnt|Library|Applications|Volumes)\/[^\s"'`<>|*?]*[^\s"'`<>|*?.,;:)\]]/g;
-const PATH_RULE = { type: 'PATH', pattern: PATH, severity: 'warning' };
+const HOME = /(?:\b[A-Za-z]:)?(?:\\{1,2}|\/)(?:Users|home)(?:\\{1,2}|\/)(?!(?:Public|Shared|Default|runner|you|user|username|me|example)(?:[\\/"'\s]|$))[^\\/\s"'`:*?<>|]+/g;
 export function placeholder(type) {
     return `[REDACTED:${type}]`;
-}
-/**
- * Lower case, forward slashes, "." and ".." folded out, and a Git Bash drive (/e/dev) written as E:/dev: the same folder
- * is the same text, in any of the forms a session writes it.
- */
-function folded(path) {
-    const parts = [];
-    const drive = path.replace(/\\+/g, '/').replace(/^\/([A-Za-z])(?=\/|$)/, '$1:');
-    for (const part of drive.toLowerCase().split('/')) {
-        if (part === '..')
-            parts.pop();
-        else if (part !== '.' && part !== '')
-            parts.push(part);
-    }
-    return (drive.startsWith('/') ? '/' : '') + parts.join('/');
-}
-function insideFolder(path, folder) {
-    const p = folded(path);
-    const f = folded(folder).replace(/\/$/, '');
-    return p === f || p.startsWith(`${f}/`);
 }
 function isPublicIp(ip) {
     const [a, b] = ip.split('.').map(Number);
@@ -119,12 +89,10 @@ export class PrivacyScan {
     found = new Map();
     rules;
     keep;
-    project;
     /** Paths with a home folder turned into ~. */
     paths = 0;
     constructor(options = {}) {
         this.keep = options.keep ?? (() => false);
-        this.project = options.project || undefined;
         const terms = (options.terms ?? []).map((t) => t.trim()).filter((t) => t.length >= 2);
         this.rules = terms.length
             ? [
@@ -152,12 +120,6 @@ export class PrivacyScan {
                 return kept ? whole : whole.split(value).join(placeholder(rule.type));
             });
         }
-        text = text.replace(PATH, (path) => {
-            if (this.project && insideFolder(path, this.project))
-                return path;
-            const kept = this.record(PATH_RULE, path);
-            return kept ? path : placeholder(PATH_RULE.type);
-        });
         return text.replace(HOME, () => {
             this.paths++;
             return '~';
@@ -237,6 +199,5 @@ export const PRIVACY_LABELS = {
     EMAIL: 'email address',
     IP_ADDRESS: 'public IP address',
     INTERNAL_HOST: 'internal hostname',
-    PATH: 'path outside the project',
     TERM: 'word from your list',
 };

@@ -356,8 +356,7 @@ async function prepare(id, cut = true) {
     const times = agentTimes(session.lines);
     const gitLines = CODEX ? [] : [...earlier, { id }].flatMap((s) => gitChangeLines(s.id, times));
     // The privacy check, on this computer: what leaves is the checked text, and the values found never do.
-    // The project's folder is the repository the session ran in: its paths stay, every other path is redacted.
-    const privacy = privacyScan(repositoryRoot(sidecar?.cwd ?? session.cwd) ?? sidecar?.cwd ?? session.cwd ?? null);
+    const privacy = privacyScan();
     const slim = privacy.jsonl(withGitLines(kept.split('\n'), gitLines).join('\n'));
     if (gitLines.length) session.code = gitCode(gitLines);
     const stats = summarize(kept, session.cwd);
