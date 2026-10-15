@@ -48,7 +48,7 @@ Programs read the commands with `--json`: `status`, `sessions`, `preview`, `send
 
 ### The desktop app
 
-[desktop/](desktop/README.md) is a window over the same commands for macOS and Windows: a three-step welcome (the agents found, sign-in, `enable`, with a tick, on by default, for the import of past sessions), the agents with a switch each, the last session sent, every project's recent sessions (`sessions --all`) with a confirmation screen before each send, and the settings. It carries the `keepplain` file of its own version and installs it in `~/.keepplain/bin` when that one is missing or older.
+[KeepPlain app](https://github.com/keepplain/keepplain-desktop) is a window over the same commands for macOS and Windows: a three-step welcome (the agents found, sign-in, `enable`, with a tick, on by default, for the import of past sessions), the agents with a switch each, the last session sent, every project's recent sessions (`sessions --all`) with a confirmation screen before each send, and the settings. It carries a released `keepplain` file and installs it in `~/.keepplain/bin` when that one is missing or older.
 
 ### From Claude's plugin directory
 
@@ -305,7 +305,7 @@ Two kinds, and each goes to one place only:
 - **Your KeepPlain token.** Taken, in this order, from `KEEPPLAIN_TOKEN`, the plugin option `token` in Claude Code (`sensitive`, kept in the system keychain; empty unless you paste one), or what `/keepplain:login` saved for that site in `~/.keepplain/credentials.json` (readable by you only). It is KeepPlain's own token and goes only to the KeepPlain site it was issued for, as `Authorization: Bearer …` on the calls in the table above (`scripts/keepplain.mjs`, `scripts/lib/hooks.mjs`). The plugin's MCP server gets it the same way: `.mcp.json` runs `node <plugin>/scripts/keepplain.mjs mcp-headers` at each connection, which prints the header for the server's own site (https://keepplain.com/mcp) and nothing for any other; not signed in, it prints `{}` and the server asks you to sign in through the browser.
 - **A proxy's `user:password`**, when your `HTTPS_PROXY` (or `HTTP_PROXY`, `ALL_PROXY`, or on Windows the manual proxy in Internet Settings) has one. It goes only to that proxy, as `Proxy-Authorization` when the tunnel opens (`scripts/lib/http.mjs`), never to KeepPlain.
 
-Nothing else is read as a credential. Your GitHub sign-in stays with your `gh`, which the plugin runs for `share`; `GH_TOKEN` in `.github/workflows` is the release job's own on GitHub Actions and never reaches your machine. The desktop app reads no token itself: it runs the same `keepplain`. In the tests (`test/`, `desktop/test/`), every token is made up (`ct_kkkk…`) and every home folder is a temporary one.
+Nothing else is read as a credential. Your GitHub sign-in stays with your `gh`, which the plugin runs for `share`; `GH_TOKEN` in `.github/workflows` is the release job's own on GitHub Actions and never reaches your machine. The desktop app reads no token itself: it runs the same `keepplain`. In the tests (`test/`), every token is made up (`ct_kkkk…`) and every home folder is a temporary one.
 
 ## What the plugin keeps on your computer
 

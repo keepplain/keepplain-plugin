@@ -75,7 +75,7 @@
  *   node keepplain.mjs import-past run        what goes on with it in the background (enable, login, the SessionStart hook)
  *   node keepplain.mjs auto-send <id> --past  one past session of that import: to the private drafts, as trigger backfill
  *   keepplain version | help
- *   --json                                      for a program (the desktop app, desktop/): status, sessions, preview, send,
+ *   --json                                      for a program (the app, keepplain-desktop): status, sessions, preview, send,
  *                                                 discard, login, whoami, logout, enable, disable, auto, rules, nudge and
  *                                                 privacy print JSON, one object a line; long commands an {"event"} per
  *                                                 step; a failure is {"error": "…"} on stdout. login --json waits for
@@ -161,7 +161,7 @@ const AGENT = AGENTS[agentId(option('agent')) ?? 'claude-code'];
 const CODEX = AGENT.id === 'codex';
 // Run by a person in a terminal rather than by an agent, which gives its commands no terminal.
 const TERMINAL = Boolean(process.stdout.isTTY && process.stdin.isTTY);
-// --json: for a program that reads the output (the desktop app, desktop/): one JSON object per line on stdout, and a
+// --json: for a program that reads the output (the app, keepplain-desktop): one JSON object per line on stdout, and a
 // failure as {"error": "…"}. Commands that take long say each step as it happens ({"event": …}).
 const JSON_OUT = args.includes('--json');
 const emit = (data) => console.log(JSON.stringify(data));
