@@ -2,7 +2,7 @@
 // signed in with OPENAI_API_KEY (the person's own ~/.codex and its auth.json are never touched). The library is not
 // checked here: Codex signs in to a plugin's MCP server only through OAuth, which a stand-in cannot do.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { findRollout } from '../scripts/lib/session.mjs';
@@ -25,6 +25,8 @@ before(async () => {
     box = sandbox('codex', site);
     env = { ...box.env, CODEX_HOME: join(box.root, 'codex') };
     box.env = env;
+    // Codex refuses a CODEX_HOME that does not exist yet.
+    mkdirSync(env.CODEX_HOME);
     const login = await runAgent(codex, ['login', '--with-api-key'], { cwd: box.root, env, input: `${process.env.OPENAI_API_KEY}\n`, ms: 60_000 });
     if (login.code !== 0) throw new Error(`codex login failed:\n${tail(login)}`);
     await enable(box, 'codex');
