@@ -1,6 +1,6 @@
 // Pi, live: `pi -p` with this repository's extension (-e) and none of the person's own, its sessions and settings in a
-// throwaway folder (PI_CODING_AGENT_DIR). The model is one of OpenAI's by default: Pi takes OPENAI_API_KEY from the
-// environment (LIVE_PI_MODEL picks another, as provider/id).
+// throwaway folder (PI_CODING_AGENT_DIR). The model is Anthropic's Haiku by default: Pi takes ANTHROPIC_API_KEY from the
+// environment, the key Claude Code's run has already (LIVE_PI_MODEL picks another, as provider/id).
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,8 +8,8 @@ import { after, before, test } from 'node:test';
 import { agentSide, fakeSite, findBin, importOf, keepOutput, keepTranscript, parseLines, PLUGIN, runAgent, sandbox, SECRET, slimmed, tail, task } from './harness.mjs';
 
 const pi = findBin('pi');
-const MODEL = process.env.LIVE_PI_MODEL || 'openai/gpt-4.1-mini';
-const why = !pi ? 'pi is not in PATH' : !process.env.LIVE_PI_MODEL && !process.env.OPENAI_API_KEY ? 'no OPENAI_API_KEY (or LIVE_PI_MODEL) for Pi' : false;
+const MODEL = process.env.LIVE_PI_MODEL || 'anthropic/claude-haiku-4-5';
+const why = !pi ? 'pi is not in PATH' : !process.env.LIVE_PI_MODEL && !process.env.ANTHROPIC_API_KEY ? 'no ANTHROPIC_API_KEY (or LIVE_PI_MODEL) for Pi' : false;
 let site;
 let box;
 let run;
