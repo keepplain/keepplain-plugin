@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { appPredecessor, compare, continuationOf, copiedUuids, findContinuation } from '../scripts/lib/continuation.mjs';
+import { appPredecessor, compare, continuationOf, copiedUuids, findContinuation, leftBehind } from '../scripts/lib/continuation.mjs';
 import { TitleWatch } from '../scripts/lib/session.mjs';
 
 const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -90,4 +90,16 @@ test('the session title is the last one the app wrote, without "(fork)"', () => 
     const none = new TitleWatch();
     none.add({ type: 'custom-title', customTitle: '  ' });
     assert.equal(none.result(), null);
+});
+
+test('what an edit left behind is the earlier file after the last line the next one copied', async () => {
+    const { cwd, put } = setup();
+    const p = put(P, lines(P, 1, 20, cwd));
+    // An edit of the 16th line: 1..15 copied, then the new version.
+    const x = put(X, [...lines(X, 1, 15, cwd), ...lines(X, 100, 110, cwd)]);
+    assert.deepEqual([...(await leftBehind(p, x))], Array.from({ length: 5 }, (_, i) => uuid(16 + i)));
+    // Continued, not edited: all of it copied, nothing left behind.
+    assert.equal((await leftBehind(p, put(Y, [...lines(Y, 1, 20, cwd), ...lines(Y, 200, 205, cwd)]))).size, 0);
+    // The first message edited: nothing copied, all of it is the earlier version.
+    assert.equal((await leftBehind(p, put('dddddddd-0000-4000-8000-000000000004', lines('d', 300, 305, cwd)))).size, 20);
 });

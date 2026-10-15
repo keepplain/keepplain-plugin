@@ -408,6 +408,42 @@ test('a continuation sends the sessions it continued with its own, as one Build,
     assert.doesNotMatch(received.toString('latin1'), /name="chain"/);
 });
 
+test('an edit of a sent message sends the version it left behind marked rewound, in place, with the chain', async () => {
+    const fixture = readFileSync(fileURLToPath(new URL('./fixtures/slim/claude-code.jsonl', import.meta.url)), 'utf8').split('\n').filter((l) => l.startsWith('{')).map((l) => JSON.parse(l));
+    const numbered = fixture.map((d, i) => ({ ...d, uuid: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}` }));
+    const first = 'a1b2c3d4-0000-4000-8000-0000000000d1';
+    const second = 'a1b2c3d4-0000-4000-8000-0000000000d2';
+    const third = 'a1b2c3d4-0000-4000-8000-0000000000d3';
+    const put = (sessionId, rows) => writeFileSync(join(home, 'projects', 'C--code-shop', `${sessionId}.jsonl`), rows.map((d) => JSON.stringify({ ...d, sessionId })).join('\n') + '\n');
+    const line = (n, role, text, minute) => ({
+        type: role, uuid: `00000000-0000-4000-8000-000000000${n}`, timestamp: `2026-09-03T09:${String(minute).padStart(2, '0')}:00.000Z`,
+        message: role === 'user' ? { role, content: text } : { id: `msg_${n}`, role, model: 'claude-opus-5-5', content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 0 } },
+    });
+    // The first try at the next message, then the author edits it twice: each edit a new session with the lines before it.
+    put(first, [...numbered, line(801, 'user', 'Use a token bucket', 0), line(802, 'assistant', 'Bucket added.', 1)]);
+    put(second, [...numbered, line(811, 'user', 'Use a sliding window', 2), line(812, 'assistant', 'Window added.', 3)]);
+    put(third, [...numbered, line(821, 'user', 'Use a fixed window', 4), line(822, 'assistant', 'Fixed window added.', 5)]);
+    const app = join(home, 'app-sessions-edits');
+    mkdirSync(join(app, 'account'), { recursive: true });
+    writeFileSync(join(app, 'account', 'local_1.json'), JSON.stringify({ cliSessionId: third, priorCliSessionIds: [first, second] }));
+
+    const preview = await cli(['preview', third], { KEEPPLAIN_CLAUDE_APP_DIR: app });
+    assert.equal(preview.ok, true, preview.out);
+    const rows = gunzipSync(readFileSync(join(temp, 'keepplain', `${third}.jsonl.gz`))).toString('utf8').split('\n').map((l) => JSON.parse(l)).filter((d) => d.message);
+    const said = (text) => rows.find((d) => JSON.stringify(d.message.content).includes(text));
+    // In the order they happened: the shared start once, each version left behind with its edit's number, then the last.
+    assert.equal(said('Use a token bucket').rewound, 1);
+    assert.equal(said('Bucket added.').rewound, 1);
+    assert.equal(said('Use a sliding window').rewound, 2);
+    assert.equal(said('Window added.').rewound, 2);
+    assert.equal(said('Use a fixed window').rewound, undefined);
+    const versions = rows.filter((d) => /token bucket|Bucket added|sliding window|Window added/.test(JSON.stringify(d.message.content)));
+    assert.equal(versions.length, 4);
+    assert.ok(rows.filter((d) => !versions.includes(d)).every((d) => d.rewound === undefined), 'the start the edits kept is the main line');
+    assert.ok(rows.indexOf(said('Window added.')) < rows.indexOf(said('Use a fixed window')));
+    assert.equal(rows.filter((d) => JSON.stringify(d.message.content).includes('Use a token bucket')).length, 1);
+});
+
 test('Builds the agent got from the library are shown in the preview and go with the session', async () => {
     const used = 'a1b2c3d4-0000-4000-8000-0000000000e1';
     const lines = readFileSync(fileURLToPath(new URL('./fixtures/slim/claude-code.jsonl', import.meta.url)), 'utf8').trimEnd();

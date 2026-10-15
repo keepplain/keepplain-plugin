@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/slimSession.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:e0dd0d64ce8a7cd9578e091d5220f9c785851a3e2abd2b31f235f50f22751dae
+// sha256:52803080932c9057157467f5f3ded4dff3c1f5d5ca5cb65ea51ff04ab1775fd2
 
 /**
  * Claude Code and Codex sessions are mostly weight nobody reads: screenshots as base64, whole files
@@ -1000,6 +1000,7 @@ function slimKept(d, type, payload, ctx) {
         return slimCodexLine(type, d.timestamp, payload, ctx);
     // Claude Code: {type, timestamp, message: {role, content}}, plus big copies like toolUseResult we skip.
     // isMeta marks messages Claude Code wrote in the person's name (skill bodies, caveats): the server skips them.
+    // rewound is the plugin's own mark on a line a later edit of a sent message left behind (the number of that edit).
     if (d.message && typeof d.message === 'object') {
         if (type === 'message') {
             const pi = slimPiMessage(d, ctx);
@@ -1018,7 +1019,8 @@ function slimKept(d, type, payload, ctx) {
         const results = Array.isArray(content) ? content.filter((b) => b?.type === 'tool_result') : [];
         if (change && results.length === 1)
             results[0].change = change;
-        return { type, timestamp: d.timestamp, ...(d.isMeta === true ? { isMeta: true } : {}), message: { role: m.role, content } };
+        const rewound = Number.isInteger(d.rewound) && d.rewound > 0 ? { rewound: d.rewound } : {};
+        return { type, timestamp: d.timestamp, ...(d.isMeta === true ? { isMeta: true } : {}), ...rewound, message: { role: m.role, content } };
     }
     // Hermes's gateway transcripts (sessions/<id>.jsonl): a chat message per line, with its tool calls or the call it answers.
     if (type === undefined && ('tool_calls' in d || 'tool_call_id' in d))

@@ -186,6 +186,23 @@ export function compare(own, theirs, told = false) {
     return { shared: inherited.size, at, inherited, theirStart: theirStart || '' };
 }
 
+/**
+ * The uuids of $path's lines that the session after it in a chain ($nextPath) left behind: those after the last line it
+ * copied. An edit of a sent message in the Claude app starts the next session with a copy of the lines before that
+ * message, so these are the version the edit went back on (all of them when the first message was edited, none when
+ * the conversation was only continued). Lines before the last copied one that it did not copy are not a version.
+ */
+export async function leftBehind(path, nextPath) {
+    const [own, next] = await Promise.all([readUuids(path), readUuids(nextPath)]);
+    const copied = new Set(next.list);
+    let last = -1;
+    own.list.forEach((u, i) => {
+        if (copied.has(u)) last = i;
+    });
+
+    return new Set(own.list.slice(last + 1));
+}
+
 /** Every uuid of a session file in order, with the line's time, and the folder it ran in: {list, times, cwd}. */
 export async function readUuids(path) {
     const list = [];

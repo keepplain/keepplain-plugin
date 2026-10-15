@@ -117,7 +117,7 @@ import { ForkWatch, SESSION_ID, TitleWatch, cutOwnCommand, formatBytes, formatDu
 import { currentCursorSession, cursorPrompt, readCursorSidecar, withCursorTimes } from './lib/cursor.mjs';
 import { piPrompt } from './lib/pi.mjs';
 import { BUSY_WAIT_MS, byProject, choosePast, describeProjects, findPast, MAX_TRIES, PACE_MS, PAST_DAYS, pastDays, pastDue, pastState, pastSummary, promptLine, queuePast, releaseLock, setPastState, takeLock, teamOffers, touchLock, UNREACHABLE_WAIT_MS } from './lib/past.mjs';
-import { continuationChain, continuationOf } from './lib/continuation.mjs';
+import { continuationChain, continuationOf, leftBehind } from './lib/continuation.mjs';
 import { extractTaskKeys } from './lib/grouping.mjs';
 import { readSidecar } from './lib/sidecar.mjs';
 import { PRIVACY_LABELS } from './lib/privacy.mjs';
@@ -511,8 +511,13 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
     const seen = new Set();
     // $pages: a Codex thread's earlier files, oldest first, each read up to the ordinal where the next goes on.
     const files = [...before.map((f) => ({ path: f, until: null })), ...pages, { path, until: null }];
+    // A chain's earlier file: its lines after the last the next one copied are a version an edit of a sent message left
+    // behind. They go marked rewound, the number of the edit, oldest first; the site folds them (TurnParser).
+    const behind = await Promise.all(before.map((f, n) => leftBehind(f, files[n + 1].path)));
+    let edits = 0;
     for (const [n, { path: file, until }] of files.entries()) {
         const last = n === files.length - 1;
+        let edit = null;
         for await (const line of createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity })) {
             if (line.trim() === '') continue;
             total++;
@@ -539,6 +544,7 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
                     title.add(d);
                     continue;
                 }
+                if (behind[n]?.has(d.uuid)) d.rewound = edit ??= ++edits;
             }
 
             if (d.type === 'session_meta') {
