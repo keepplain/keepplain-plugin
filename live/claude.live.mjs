@@ -1,5 +1,6 @@
 // Claude Code, live: `claude -p` with this plugin (--plugin-dir) and nothing of the person's own settings, so a
-// KeepPlain plugin installed on this computer neither runs twice nor sends to the real site.
+// KeepPlain plugin installed on this computer neither runs twice nor sends to the real site. Not --strict-mcp-config:
+// it leaves out the plugin's own MCP server too, and the library call is part of the check.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,7 +25,6 @@ before(async () => {
         '--model', MODEL,
         '--plugin-dir', plugin,
         '--setting-sources', 'project,local',
-        '--strict-mcp-config',
         '--allowedTools', 'Write,Edit,Read,mcp__plugin_keepplain_keepplain__search_my_work',
         '--output-format', 'stream-json', '--verbose', '--include-hook-events',
     ], { cwd: box.repo, env: box.env });

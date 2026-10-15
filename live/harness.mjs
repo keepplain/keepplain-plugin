@@ -24,17 +24,21 @@ export const OUT = fileURLToPath(new URL('./out/', import.meta.url));
 
 /**
  * The program of a command in PATH, as [program, arguments] to spawn without a shell. An npm shim on Windows (.cmd)
- * cannot be spawned directly: the script it runs goes to this node instead.
+ * cannot be spawned directly: what it runs is spawned instead, a script under this node, a program as it is. The
+ * extensionless file next to a shim is a shell script, not a program Windows can start.
  */
 export function findBin(name) {
-    const exts = process.platform === 'win32' ? ['.exe', '.cmd', ''] : [''];
+    const exts = process.platform === 'win32' ? ['.exe', '.cmd'] : [''];
     for (const dir of (process.env.PATH ?? '').split(delimiter)) {
         for (const ext of exts) {
             const path = join(dir, name + ext);
             if (!dir || !existsSync(path)) continue;
             if (ext !== '.cmd') return [path, []];
-            const script = readFileSync(path, 'utf8').match(/"%dp0%\\([^"]+\.(?:c|m)?js)"/)?.[1];
-            if (script) return [process.execPath, [join(dir, script)]];
+            // The last one: a shim names %dp0%\node.exe first, for the node it prefers.
+            const target = [...readFileSync(path, 'utf8').matchAll(/"%dp0%\\([^"]+)"/g)].at(-1)?.[1];
+            if (!target) continue;
+            if (/\.(?:c|m)?js$/i.test(target)) return [process.execPath, [join(dir, target)]];
+            return [join(dir, target), []];
         }
     }
 
