@@ -23,11 +23,14 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Cursor is left out until there is a CURSOR_API_KEY: the Free plan's dashboard has no user API keys, and CI has
         # no browser to sign in with. live/cursor.live.mjs is ready: add cursor here and the secret.
-        agent: [claude,  pi]
+        # Antigravity signs in with a Gemini API key (GEMINI_API_KEY): Google's sign-in needs a browser. It is not available
+        # in every country; GitHub's runners are where it is.
+        agent: [claude, pi, antigravity]
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -48,6 +51,16 @@ jobs:
           irm 'https://cursor.com/install?win32=true' | iex
           Add-Content $env:GITHUB_PATH "$env:LOCALAPPDATA\cursor-agent"
         shell: pwsh
+      - if: matrix.agent == 'antigravity' && runner.os != 'Windows'
+        run: |
+          curl -fsSL https://antigravity.google/cli/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        shell: bash
+      - if: matrix.agent == 'antigravity' && runner.os == 'Windows'
+        run: |
+          irm https://antigravity.google/cli/install.ps1 | iex
+          Add-Content $env:GITHUB_PATH "$env:LOCALAPPDATA\agy\bin"
+        shell: pwsh
 
       - name: Versions
         shell: bash
@@ -56,6 +69,7 @@ jobs:
             claude) claude --version ;;
             pi) pi --version ;;
             cursor) (agent --version || cursor-agent --version) ;;
+            antigravity) agy --version ;;
           esac
 
       - run: node --test live/${{ matrix.agent }}.live.mjs

@@ -6,6 +6,8 @@
  *   Codex        the rollouts of the last days whose session_meta names the folder as cwd
  *   Pi           <sessions folder>/--<the folder>--/<time>_<id>.jsonl (lib/pi.mjs)
  *   Cursor       ~/.cursor/projects/<the folder>/agent-transcripts/<id>/<id>.jsonl (lib/cursor.mjs)
+ *   Antigravity  ~/.gemini/<surface>/brain/<id>/.system_generated/logs/transcript_full.jsonl, whatever the folder: the hooks
+ *                note which folder it ran in (lib/antigravity.mjs)
  *
  * A folder inside a repository also finds the sessions run at the repository's top. What was sent is remembered in
  * ~/.keepplain/sent.json (the send step; SENT_DAYS, then forgotten) and in auto mode's auto-sessions.json.
@@ -16,6 +18,7 @@ import { createInterface } from 'node:readline';
 import { autoSession, autoSessions } from './auto.mjs';
 import { home, writePrivate } from './credentials.mjs';
 import { projectOf, repositoryRoot, worktrees } from './git.mjs';
+import { antigravitySessions, describeAntigravity, findAntigravityTranscript, readAntigravityNotes, transcriptCwd } from './antigravity.mjs';
 import { cursorSessions, describeCursor, findCursorTranscript } from './cursor.mjs';
 import { describePi, findPiSession, piSessions } from './pi.mjs';
 import { codexHome, configDir, findRollout, findTranscript, isCodexPrompt, promptText, rolloutFiles } from './session.mjs';
@@ -37,7 +40,7 @@ export function folderSessions(folder, { env = process.env, now = Date.now() } =
     const root = projectOf(folder)?.root ?? repositoryRoot(folder);
     const folders = [...new Set([folder, repositoryRoot(folder), root, ...worktrees(root)].filter(Boolean).map(normal))];
     const removed = root ? join(normal(root), '.claude', 'worktrees') : null;
-    const found = [...claudeSessions(folders, configDir(env), removed), ...codexSessions(folders, codexHome(env), now, removed), ...piSessions(folders, env), ...cursorSessions(folders, env)];
+    const found = [...claudeSessions(folders, configDir(env), removed), ...codexSessions(folders, codexHome(env), now, removed), ...piSessions(folders, env), ...cursorSessions(folders, env), ...antigravitySessions(folders, env)];
     // A Codex thread reverted has several rollouts: the newest stands for it.
     const newest = new Map();
     for (const s of found.sort((a, b) => b.mtimeMs - a.mtimeMs)) if (!newest.has(`${s.agent}:${s.id}`)) newest.set(`${s.agent}:${s.id}`, s);
@@ -51,17 +54,21 @@ export function folderSessions(folder, { env = process.env, now = Date.now() } =
  */
 export function allSessions({ env = process.env, now = Date.now(), days = CODEX_DAYS } = {}) {
     const since = now - days * 86_400_000;
-    const found = [...claudeSessions(null, configDir(env), null), ...codexSessions(null, codexHome(env), now, null, days), ...piSessions(null, env), ...cursorSessions(null, env)].filter((s) => s.mtimeMs >= since);
+    const found = [...claudeSessions(null, configDir(env), null), ...codexSessions(null, codexHome(env), now, null, days), ...piSessions(null, env), ...cursorSessions(null, env), ...antigravitySessions(null, env)].filter((s) => s.mtimeMs >= since);
     const newest = new Map();
     for (const s of found.sort((a, b) => b.mtimeMs - a.mtimeMs)) if (!newest.has(`${s.agent}:${s.id}`)) newest.set(`${s.agent}:${s.id}`, s);
 
     return [...newest.values()];
 }
 
-/** The folder a session ran in, from the start of its file: Claude Code's lines, Codex's session_meta, Pi's header. */
-export function sessionCwd({ agent, path }) {
+/**
+ * The folder a session ran in, from the start of its file: Claude Code's lines, Codex's session_meta, Pi's header;
+ * Antigravity's from what its hooks noted, else its first command.
+ */
+export function sessionCwd({ agent, path, id = null }) {
     if (agent === 'codex') return rolloutCwd(path);
     if (agent === 'cursor') return null;
+    if (agent === 'antigravity') return readAntigravityNotes(id ?? path.replace(/\\/g, '/').split('/').at(-4))?.cwd ?? transcriptCwd(path);
     const buffer = Buffer.alloc(256 * 1024);
     let fd;
     try {
@@ -81,13 +88,14 @@ export function sessionPath(agent, id, env = process.env, hint = null) {
     if (agent === 'codex') return findRollout(id, codexHome(env));
     if (agent === 'pi') return findPiSession(id, env);
     if (agent === 'cursor') return findCursorTranscript(id, env, hint);
+    if (agent === 'antigravity') return findAntigravityTranscript(id, env, hint);
 
     return findTranscript(id, configDir(env));
 }
 
 /** Which agent ran the session with this id on this computer, or null. */
 export function agentOfSession(id, env = process.env) {
-    return ['claude-code', 'codex', 'pi', 'cursor'].find((agent) => sessionPath(agent, id, env)) ?? null;
+    return ['claude-code', 'codex', 'pi', 'cursor', 'antigravity'].find((agent) => sessionPath(agent, id, env)) ?? null;
 }
 
 function claudeSessions(folders, dir, removed) {
@@ -155,6 +163,7 @@ export function rolloutCwd(path) {
 export async function describeSession({ agent, path }) {
     if (agent === 'pi') return describePi(path);
     if (agent === 'cursor') return describeCursor(path);
+    if (agent === 'antigravity') return describeAntigravity(path);
     const marker = agent === 'codex' ? '"role":"user"' : '"type":"user"';
     let prompts = 0;
     let firstPrompt = null;

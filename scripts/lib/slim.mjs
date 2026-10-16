@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/slimSession.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:52803080932c9057157467f5f3ded4dff3c1f5d5ca5cb65ea51ff04ab1775fd2
+// sha256:57fdba995cf047bbc1f029a42f2f156875040bc45eeabfb57c3b5a3374248da5
 
 /**
  * Claude Code and Codex sessions are mostly weight nobody reads: screenshots as base64, whole files
@@ -119,9 +119,9 @@ const LIBRARY_SCRIPT = /(?:^|[^A-Za-z0-9_]|__)(?:search_coding_agent_sessions|fi
 /** Cursor calls the tools of an MCP server through these: the server and tool are in the input. */
 const MCP_WRAPPERS = ['callmcptool', 'calldynamictool'];
 /** Shell tools: the command's words are checked for secret files (`cat .env`, `type prod.env`). */
-const SHELL_TOOLS = ['bash', 'shell', 'sh', 'zsh', 'powershell', 'pwsh', 'cmd', 'exec', 'exec_command', 'local_shell', 'shell_command', 'container.exec', 'run_terminal_cmd', 'run_shell_command', 'terminal', 'execute_command'];
-/** Where tools name the file they read, search or change. */
-const PATH_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'file', 'filename'];
+const SHELL_TOOLS = ['bash', 'shell', 'sh', 'zsh', 'powershell', 'pwsh', 'cmd', 'exec', 'exec_command', 'local_shell', 'shell_command', 'container.exec', 'run_terminal_cmd', 'run_shell_command', 'terminal', 'execute_command', 'run_command'];
+/** Where tools name the file they read, search or change (Antigravity's: TargetFile, AbsolutePath). */
+const PATH_KEYS = ['file_path', 'filePath', 'path', 'notebook_path', 'file', 'filename', 'TargetFile', 'AbsolutePath'];
 const isSecretFile = (path) => typeof path === 'string' && path !== '' && withheldReason(path.replace(/\\/g, '/')) === 'sensitive';
 /**
  * The KeepPlain library's tools: mcp__…keepplain…__*, plugin_keepplain*, or one of its tool names however
@@ -176,7 +176,8 @@ export function callMark(name, input) {
         return 'sensitive';
     if (!shell && (a.command === undefined || a.command === null) && (a.cmd === undefined || a.cmd === null))
         return null;
-    let command = a.command ?? a.cmd ?? a.script;
+    // Antigravity's run_command takes CommandLine.
+    let command = a.command ?? a.cmd ?? a.script ?? a.CommandLine;
     if (Array.isArray(command))
         command = command.filter((c) => typeof c === 'string').join(' ');
     if (typeof command !== 'string')
@@ -891,6 +892,108 @@ function slimCursorRow(d, ctx) {
     const content = blocks.map((b) => cursorBlock(b, ctx)).filter((b) => b !== null);
     return content.length ? { type: 'assistant', message: { role: 'assistant', content } } : null;
 }
+/*
+ * Antigravity (Google's App, CLI and IDE) writes a step per line to
+ * ~/.gemini/antigravity{,-cli,-ide}/brain/<conversation>/.system_generated/logs/transcript_full.jsonl: {step_index, source,
+ * type, status, created_at, …}. A USER_INPUT holds what the person typed in <USER_REQUEST>, next to notes the agent adds
+ * itself (<ADDITIONAL_METADATA>, <USER_SETTINGS_CHANGE>). A PLANNER_RESPONSE is the model's: its text in content, its
+ * thinking, and tool_calls ({name, args}, without an id); the GENERIC steps after it answer those calls in order, each
+ * opening with "Created At" and "Completed At". An ERROR_MESSAGE is the service retrying (a 503), not the agent failing.
+ * transcript.jsonl beside it encodes every argument a second time: only the _full file is read. The steps go into the
+ * shape Claude Code uses; a call that writes a file carries its change on its answer: the diff the answer shows between
+ * [diff_block_start] and [diff_block_end] (with line numbers), else what the call said.
+ */
+/** What Antigravity's write_to_file (the whole file) or replace_file_content (one replacement) does, as the call says it. */
+function antigravityChange(name, args, ctx) {
+    const path = typeof args.TargetFile === 'string' && args.TargetFile !== '' ? args.TargetFile : null;
+    if (path === null)
+        return null;
+    if (name === 'write_to_file' && typeof args.CodeContent === 'string') {
+        const lines = args.CodeContent.split('\n');
+        if (lines[lines.length - 1] === '')
+            lines.pop();
+        return fileChange(path, 'add', [`@@ -0,0 +1,${lines.length} @@`, ...lines.map((l) => `+${l}`)], ctx);
+    }
+    if (name === 'replace_file_content' && typeof args.TargetContent === 'string' && typeof args.ReplacementContent === 'string') {
+        // The call says what to replace, not where: the hunk has no line numbers.
+        const side = (text, sign) => text.replace(/\n+$/, '').split('\n').map((l) => sign + l);
+        return fileChange(path, 'update', ['@@ @@', ...side(args.TargetContent, '-'), ...side(args.ReplacementContent, '+')], ctx);
+    }
+    return null;
+}
+/** The hunks an Antigravity answer shows between [diff_block_start] and [diff_block_end]; null without any. */
+function antigravityDiff(text) {
+    const lines = [...text.matchAll(/\[diff_block_start\]\r?\n([\s\S]*?)\[diff_block_end\]/g)].flatMap((m) => piPatchLines(m[1]) ?? []);
+    return lines.length ? lines : null;
+}
+/** An Antigravity call as a tool_use block; it waits in ctx.agCalls for the step that answers it. */
+function antigravityCall(call, ctx) {
+    if (!call || typeof call !== 'object')
+        return null;
+    const c = call;
+    const name = typeof c.name === 'string' && c.name !== '' ? c.name : 'tool';
+    const args = c.args && typeof c.args === 'object' && !Array.isArray(c.args) ? c.args : {};
+    // The steps never say the workspace; a command runs in it unless told otherwise, so the first one's folder is the session's.
+    if (name === 'run_command' && typeof args.Cwd === 'string' && args.Cwd !== '')
+        ctx.cwd ??= args.Cwd;
+    (ctx.agCalls ??= []).push({ name, path: typeof args.TargetFile === 'string' && args.TargetFile !== '' ? args.TargetFile : null, change: antigravityChange(name, args, ctx) });
+    const mark = callMark(name, args);
+    remember(ctx, undefined, mark);
+    return { type: 'tool_use', name, input: callInput(mark, args) };
+}
+/** The answer of the oldest waiting call as a tool_result; null for a step that answers none. A command that exited non-zero failed. */
+function antigravityResult(d, ctx) {
+    const call = ctx.agCalls?.shift();
+    if (!call)
+        return null;
+    const mark = recall(ctx, undefined);
+    const text = typeof d.content === 'string' ? d.content.replace(/^Created At: [^\n]*\n(?:Completed At: [^\n]*\n)?\n*/, '') : '';
+    const code = text.match(/^The command exited with code (-?\d+)\./m);
+    const failed = d.status === 'ERROR' || (typeof d.error === 'string' && d.error !== '') || (code !== null && Number(code[1]) !== 0);
+    const diff = failed || call.path === null ? null : antigravityDiff(text);
+    const change = failed || call.path === null ? null : diff ? fileChange(call.path, 'update', diff, ctx) : call.change;
+    return {
+        type: 'tool_result',
+        content: answer(mark, text),
+        ...(mark === 'sensitive' ? { withheld: 'sensitive' } : {}),
+        ...(failed ? { is_error: true } : {}),
+        ...(change ? { change } : {}),
+    };
+}
+/**
+ * One Antigravity step as a Claude Code line; null for what is not the conversation (the service's retries, the agent's
+ * own steps). The model the person picks is told inside their message (USER_SETTINGS_CHANGE): its "(High)" is the effort.
+ */
+function slimAntigravityStep(d, ctx) {
+    const at = typeof d.created_at === 'string' ? { timestamp: d.created_at } : {};
+    const text = typeof d.content === 'string' ? d.content : '';
+    if (d.type === 'USER_INPUT') {
+        // A new message: calls of the last round left without an answer were interrupted.
+        ctx.agCalls = [];
+        const effort = effortName(text.match(/`Model Selection` from [^\n]*? to [^\n]*?\(([A-Za-z]+)\)\./)?.[1]);
+        if (effort !== null && effort !== ctx.effort) {
+            ctx.effort = effort;
+            ctx.effortTold = false;
+        }
+        const request = text.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/)?.[1] ?? (text.trimStart().startsWith('<') ? null : text.trim());
+        return request ? { type: 'user', ...at, message: { role: 'user', content: request } } : null;
+    }
+    if (d.type === 'PLANNER_RESPONSE') {
+        ctx.agCalls = [];
+        const content = text.trim() !== '' ? [{ type: 'text', text }] : [];
+        for (const call of Array.isArray(d.tool_calls) ? d.tool_calls : []) {
+            const block = antigravityCall(call, ctx);
+            if (block)
+                content.push(block);
+        }
+        return content.length ? { type: 'assistant', ...at, message: { role: 'assistant', content } } : null;
+    }
+    if (d.type === 'GENERIC' && d.source === 'MODEL') {
+        const result = antigravityResult(d, ctx);
+        return result ? { type: 'user', ...at, message: { role: 'user', content: [result] } } : null;
+    }
+    return null;
+}
 function slimBlock(block, ctx) {
     if (!block || typeof block !== 'object')
         return block;
@@ -998,6 +1101,9 @@ function slimKept(d, type, payload, ctx) {
     // Codex rollout: {timestamp, type: 'response_item', payload: {...}}
     if (payload)
         return slimCodexLine(type, d.timestamp, payload, ctx);
+    // Antigravity: {step_index, source, type: 'USER_INPUT' | 'PLANNER_RESPONSE' | …, created_at, …}
+    if (typeof d.step_index === 'number' && typeof d.source === 'string' && typeof type === 'string' && /^[A-Z][A-Z_]*$/.test(type))
+        return slimAntigravityStep(d, ctx);
     // Claude Code: {type, timestamp, message: {role, content}}, plus big copies like toolUseResult we skip.
     // isMeta marks messages Claude Code wrote in the person's name (skill bodies, caveats): the server skips them.
     // rewound is the plugin's own mark on a line a later edit of a sent message left behind (the number of that edit).

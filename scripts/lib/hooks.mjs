@@ -2,8 +2,9 @@
  * The plugin's hooks, by event. Claude Code runs hooks/hooks.json, Codex runs codex/hooks.json (with --agent=codex);
  * each script there runs one of these. The single keepplain file runs them as `keepplain hook <agent> <event>`
  * (plan, stage 13.1), one command per event, git snapshot included. Cursor runs them from the hooks.json in ~/.cursor
- * (`hook cursor <event>`: sessionStart, beforeSubmitPrompt as `prompt`, stop, sessionEnd), and Pi from the extension of
- * its package, which turns session_start, agent_start, agent_settled and session_shutdown into the same four events.
+ * (`hook cursor <event>`: sessionStart, beforeSubmitPrompt as `prompt`, stop, sessionEnd), Pi from the extension of
+ * its package, which turns session_start, agent_start, agent_settled and session_shutdown into the same four events, and
+ * Antigravity from ~/.gemini/config/hooks.json (antigravityHook: it has no end of a session, and answers in its own shape).
  *
  * Every event the agent writes on stdin carries the same fields that matter here: session_id, transcript_path and cwd
  * (Cursor's are conversation_id, transcript_path and workspace_roots: cursorEvent renames them).
@@ -40,6 +41,7 @@ import { autoMode, catchUp, inBackground, removeStaleTemps, RUNNING_MODES, sessi
 import { pastDue } from './past.mjs';
 import { siteUrl } from './config.mjs';
 import { savedToken } from './credentials.mjs';
+import { antigravityEvent, antigravityOutput, lastAntigravityPrompt, newAntigravityPrompt, noteAntigravityEvent, pruneAntigravityNotes } from './antigravity.mjs';
 import { cursorEvent, noteCursorEvent, pruneCursorNotes, readCursorSidecar } from './cursor.mjs';
 import { readEvent } from './event.mjs';
 import { handoffDue, handoffMessage, handoffOn, handoffTargets, handoffThreshold, nearLimit, readLimits } from './handoff.mjs';
@@ -72,7 +74,41 @@ export { readEvent };
  * the same run (every agent's but Codex's); the scripts of hooks/hooks.json leave it to snapshot.mjs, which Claude Code
  * runs alongside.
  */
-export async function runHook(agent, name, { snapshot = agent !== 'codex', event = null } = {}) {
+export async function runHook(agent, name, options = {}) {
+    return agent === 'antigravity' ? antigravityHook(name, options) : dispatch(agent, name, options);
+}
+
+/**
+ * Antigravity's hooks (~/.gemini/config/hooks.json): SessionStart as `session-start`, PreInvocation as `prompt`,
+ * PostToolUse as `tool`, Stop as `stop`; PreToolUse is never ours, since a hook of it that fails blocks every tool.
+ * PreInvocation runs before every call of the model: only the first after a new message of the person's is a prompt,
+ * told by the transcript (its text is not in the event). Antigravity fails a hook whose output has a field it does not
+ * know, and a turn on output that is not UTF-8: what the shared hooks print is turned into its own (antigravityOutput),
+ * one JSON object always, whatever went wrong.
+ */
+async function antigravityHook(name, { snapshot = true, event = null } = {}) {
+    const printed = [];
+    const log = console.log;
+    console.log = (...args) => printed.push(args.map(String).join(' '));
+    try {
+        event = antigravityEvent(event ?? (await readEvent()));
+        noteAntigravityEvent(event);
+        let go = true;
+        if (name === 'prompt') {
+            const last = event.transcript_path ? await lastAntigravityPrompt(event.transcript_path) : null;
+            go = newAntigravityPrompt(event.session_id, last);
+            if (go) event = { ...event, prompt: last.text ?? '' };
+        }
+        if (go) await dispatch('antigravity', name, { snapshot, event });
+    } catch {
+        // Odd input or an unreadable home folder: the conversation goes on as it would without the plugin.
+    } finally {
+        console.log = log;
+    }
+    process.stdout.write(JSON.stringify(antigravityOutput(name, printed)));
+}
+
+async function dispatch(agent, name, { snapshot = agent !== 'codex', event = null } = {}) {
     try {
         event ??= await readEvent();
     } catch {
@@ -139,6 +175,7 @@ function sessionStart({ event, agent, site, id, agentArgs }, emit = true) {
         noteCursorEvent('start', event);
         pruneCursorNotes();
     }
+    if (agent === 'antigravity') pruneAntigravityNotes();
     const rules = rulesAtStart({ event, agent, site, agentArgs });
     // One systemMessage for everything the start has to say: the agents take one JSON object from a hook.
     const messages = [teamRulesAtStart({ event, agent, site, agentArgs }), rules?.line, ...shareAtStart({ event, site, agentArgs })].filter(Boolean);
@@ -152,8 +189,9 @@ function sessionStart({ event, agent, site, id, agentArgs }, emit = true) {
         if (agent === 'cursor') out.additional_context = rules.context;
         else out.hookSpecificOutput = { hookEventName: 'SessionStart', additionalContext: rules.context };
     }
-    if (agent === 'cursor' && id && SESSION_ID.test(id)) {
-        out.additional_context = [out.additional_context, `KeepPlain current session: client=cursor_plugin session_id=${id}. Use this exact id if attaching this conversation to a previous task; detect the repository again at query time.`].filter(Boolean).join('\n');
+    // Neither can tell the library's attach tool which conversation it is in: the start says it.
+    if ((agent === 'cursor' || agent === 'antigravity') && id && SESSION_ID.test(id)) {
+        out.additional_context = [out.additional_context, `KeepPlain current session: client=${agent}_plugin session_id=${id}. Use this exact id if attaching this conversation to a previous task; detect the repository again at query time.`].filter(Boolean).join('\n');
     }
     // Cursor's prompt hook takes no context: what it has to say goes into this start's, when the start is answered.
     const unsaid = agent === 'cursor' && emit ? unsaidContext(takeUnsaid(agent, id)) : '';

@@ -46,10 +46,10 @@ export function codexShowsMessages(path) {
 
 /**
  * Whether the person sees a hook's systemMessage in this session. Claude Code: yes. Codex: in its CLI. Pi: with a UI
- * (its extension says so as shows_messages). Cursor: never, its hooks have no such channel.
+ * (its extension says so as shows_messages). Cursor and Antigravity: never, their hooks have no such channel.
  */
 export function showsMessages(agent, event = {}, path = null) {
-    if (agent === 'cursor') return false;
+    if (agent === 'cursor' || agent === 'antigravity') return false;
     if (agent === 'pi') return event.shows_messages !== false;
     if (agent === 'codex') return path ? codexShowsMessages(path) : true;
 

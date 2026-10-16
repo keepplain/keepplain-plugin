@@ -114,8 +114,8 @@ const cli = (args, extra = {}, input = null) => {
     );
 };
 
-test('the four agents: ids and aliases, how a command is typed, what a background run passes on', () => {
-    assert.deepEqual(Object.keys(AGENTS), ['claude-code', 'codex', 'cursor', 'pi']);
+test('the agents: ids and aliases, how a command is typed, what a background run passes on', () => {
+    assert.deepEqual(Object.keys(AGENTS), ['claude-code', 'codex', 'cursor', 'pi', 'antigravity']);
     assert.equal(agentId('claude'), 'claude-code');
     assert.equal(agentId('Pi'), 'pi');
     assert.equal(agentId('windsurf'), null);

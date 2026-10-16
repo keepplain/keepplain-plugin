@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/sessionUsage.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:17c133360874f1ad8414fe52ba2da80be50d83551e3631ad06ec500be2946bac
+// sha256:57986a5e1d7a62f58bfe687a588fc85f6ad31401f281d4f2c3ab53081267368a
 
 /**
  * The tokens a session spent, per model (plan: private and team Builds, phase 3). Slimming drops the bookkeeping
@@ -12,7 +12,8 @@
  * last total counts, less another thread's history the thread started on. Codex input includes the cached part; here
  * "input" is what was not read from the cache. Hermes's session export keeps the session's totals on the session. Pi
  * puts each assistant message's usage on the message, and the tokens of other model work (a cache warm) in `usage`
- * entries.
+ * entries. Antigravity puts each model step's tokens on the step (input is what was not read from the cache) and names
+ * the model only where the person picks it, in their message ("Gemini 3.8 Flash (High)": the effort is not the model).
  *
  * Lines a session inherited (a fork's, a continuation's copy) are left out by the caller: add() never sees them.
  */
@@ -31,6 +32,7 @@ function modelName(value) {
 export class UsageCounter {
     messages = new Map();
     codexModel = 'unknown';
+    antigravityModel = 'unknown';
     codexTotal = null;
     /** undefined until session_meta; false: no other thread's history; null: there is one, its spending not seen yet. */
     codexBase = undefined;
@@ -55,6 +57,18 @@ export class UsageCounter {
                 model: modelName(piUsage.model),
                 usage: { input: count(u.input), output: count(u.output), cache_read: count(u.cacheRead), cache_write: count(u.cacheWrite) },
             });
+            return;
+        }
+        if (typeof d.step_index === 'number' && typeof d.source === 'string') {
+            const picked = d.type === 'USER_INPUT' && typeof d.content === 'string' ? d.content.match(/`Model Selection` from [^\n]*? to ([^\n]+?)(?: \([A-Za-z]+\))?\.(?: |\n|$)/) : null;
+            if (picked)
+                this.antigravityModel = modelName(picked[1]);
+            if (d.type === 'PLANNER_RESPONSE') {
+                this.messages.set(`antigravity-${d.step_index}`, {
+                    model: this.antigravityModel,
+                    usage: { input: count(d.input_tokens), output: count(d.output_tokens), cache_read: count(d.cache_read_tokens), cache_write: 0 },
+                });
+            }
             return;
         }
         if (d.type === 'assistant' && d.message && typeof d.message === 'object') {

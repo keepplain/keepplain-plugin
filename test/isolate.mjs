@@ -16,6 +16,9 @@ if (!process.env.CT_TEST_ISOLATED) {
     process.env.KEEPPLAIN_CLAUDE_APP_DIR ||= join(dir, 'claude-app');
     process.env.PI_CODING_AGENT_DIR ||= join(dir, 'pi');
     process.env.PI_CODING_AGENT_SESSION_DIR ||= join(dir, 'pi-sessions');
+    // Antigravity's ~/.gemini, where its surfaces keep their conversations (lib/antigravity.mjs).
+    process.env.KEEPPLAIN_GEMINI_DIR ||= join(dir, 'gemini');
+    delete process.env.ANTIGRAVITY_CONVERSATION_ID;
     delete process.env.PI_SESSION_ID;
     delete process.env.PI_SESSION_FILE;
     delete process.env.CURSOR_TRANSCRIPT_PATH;

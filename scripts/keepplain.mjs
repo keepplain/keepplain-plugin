@@ -114,6 +114,7 @@ import { nudgeOn, setNudge } from './lib/nudge.mjs';
 import { agentName, buildBrief, copyToClipboard, handoffOn, handoffTargets, handoffThreshold, openTerminal, pruneHandoffs, setHandoff, startCommand, writeBrief } from './lib/handoff.mjs';
 import { MEMORY_TOOLS, workContext, memoryArguments } from './lib/work-memory.mjs';
 import { ForkWatch, SESSION_ID, TitleWatch, cutOwnCommand, formatBytes, formatDuration, isCodexPrompt, newestSessionId, promptText, rolloutFiles, summarize } from './lib/session.mjs';
+import { antigravityPrompt, currentAntigravitySession, readAntigravityNotes, transcriptCwd } from './lib/antigravity.mjs';
 import { currentCursorSession, cursorPrompt, readCursorSidecar, withCursorTimes } from './lib/cursor.mjs';
 import { piPrompt } from './lib/pi.mjs';
 import { BUSY_WAIT_MS, byProject, choosePast, describeProjects, findPast, MAX_TRIES, PACE_MS, PAST_DAYS, pastDays, pastDue, pastState, pastSummary, promptLine, queuePast, releaseLock, setPastState, takeLock, teamOffers, touchLock, UNREACHABLE_WAIT_MS } from './lib/past.mjs';
@@ -296,15 +297,27 @@ function setupFlags() {
 
 /**
  * The session this agent runs the command in, from what it puts in the environment of its commands: Codex's thread, Pi's
- * session. Claude Code's skills pass their session's id; Cursor tells nothing, so its hooks noted the conversation of
- * each workspace (lib/cursor.mjs), and the newest transcript of this folder's workspace is the fallback.
+ * session, Antigravity's conversation where it says it (else what its hooks noted of this folder, lib/antigravity.mjs).
+ * Claude Code's skills pass their session's id; Cursor tells nothing, so its hooks noted the conversation of each
+ * workspace (lib/cursor.mjs), and the newest transcript of this folder's workspace is the fallback.
  */
 function currentSession() {
     if (AGENT.id === 'codex') return env.CODEX_THREAD_ID;
     if (AGENT.id === 'pi') return env.PI_SESSION_ID;
     if (AGENT.id === 'cursor') return currentCursorSession(process.cwd(), env)?.id;
+    if (AGENT.id === 'antigravity') return currentAntigravitySession(process.cwd(), env)?.id;
 
     return env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID;
+}
+
+/**
+ * What the hooks noted of a session whose file does not say it all: Cursor's (folder, transcript, times, tokens) and
+ * Antigravity's (folder, transcript, model); null for the other agents, and when no hook ran.
+ */
+function hookNotes(id) {
+    if (AGENT.id === 'cursor') return readCursorSidecar(id, env);
+
+    return AGENT.id === 'antigravity' ? readAntigravityNotes(id, env) : null;
 }
 
 function sessionId(given = argId) {
@@ -346,14 +359,17 @@ function pruneOwnSnapshots() {
  * /keepplain:build would lose the rest.
  */
 async function prepare(id, cut = true, past = false) {
-    // What Cursor's hooks noted; a past conversation (the import, lib/past.mjs) has none, only the folder it found for it.
-    const cursorNotes = AGENT.id === 'cursor' ? (readCursorSidecar(id, env) ?? (option('cwd') ? { cwd: option('cwd') } : null)) : null;
+    // What Cursor's or Antigravity's hooks noted; a past conversation (the import, lib/past.mjs) has none, only the folder it found for it.
+    let cursorNotes = ['cursor', 'antigravity'].includes(AGENT.id) ? (hookNotes(id) ?? (option('cwd') ? { cwd: option('cwd') } : null)) : null;
     const path = sessionPath(AGENT.id, id, env, cursorNotes?.transcript_path ?? null);
+    // No hook noted where an Antigravity conversation ran: the folder of its first command.
+    if (AGENT.id === 'antigravity' && path && !cursorNotes?.cwd) cursorNotes = { ...cursorNotes, cwd: transcriptCwd(path) };
     if (!path) {
         throw new Failure({
             codex: `Could not find this session's rollout (rollout-…-${id}.jsonl) under the Codex sessions folder.`,
             pi: `Could not find this session's file (<time>_${id}.jsonl) under Pi's sessions folder.`,
             cursor: `Could not find this conversation's transcript (${id}.jsonl) under ~/.cursor/projects/…/agent-transcripts.`,
+            antigravity: `Could not find this conversation's transcript (${id}/…/transcript_full.jsonl) under ~/.gemini/antigravity-cli/brain, antigravity/brain or antigravity-ide/brain.`,
         }[AGENT.id] ?? `Could not find this session's transcript (${id}.jsonl) under the Claude Code config folder.`);
     }
 
@@ -489,7 +505,7 @@ async function preview(id) {
  * session ran, for Codex HEAD at its start (session_meta), the session it was forked from (lib/session.mjs, ForkWatch),
  * and what the agent took from the KeepPlain library (lib/library.mjs). A Cursor transcript says neither where it ran
  * nor when (but by the minute) nor what it cost: $cursorNotes, what its hooks noted, gives the folder, the times of the
- * turns and the tokens (lib/cursor.mjs). $before: the files of the sessions this one continued, oldest first (lib/continuation.mjs):
+ * turns and the tokens (lib/cursor.mjs); an Antigravity conversation's give the folder and the model (lib/antigravity.mjs). $before: the files of the sessions this one continued, oldest first (lib/continuation.mjs):
  * read first, as one session with this file's, and a line any of them copied from another is taken once.
  */
 async function readSession(path, id, inherited = null, cursorNotes = null, before = [], pages = []) {
@@ -588,7 +604,7 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
         headStart,
         branch,
         bytes: files.reduce((sum, f) => sum + statSync(f.path).size, 0),
-        usage: usage.result() ?? noted,
+        usage: namedModel(usage.result(), cursorNotes?.model) ?? noted,
         code,
         fork: fork.result(),
         continuation: fork.continuation(),
@@ -599,8 +615,19 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
     };
 }
 
+/** Tokens of a model the session does not name (Antigravity names it only where the person picks one) go under the model the hooks saw. */
+function namedModel(usage, model) {
+    if (!usage?.models?.unknown || !model) return usage;
+    const { unknown, ...named } = usage.models;
+    const m = (named[model] ??= { input: 0, output: 0, cache_read: 0, cache_write: 0 });
+    for (const key of Object.keys(m)) m[key] += unknown[key] ?? 0;
+
+    return { models: named };
+}
+
 /** What the person typed in a parsed line of any agent's session, or null: the first prompts hold a task's number. */
 function firstPrompt(d) {
+    if (d.type === 'USER_INPUT') return antigravityPrompt(d);
     if (d.type === 'user' && !d.isMeta) return promptText(d.message?.content);
     if (d.type === 'response_item' && d.payload?.type === 'message' && d.payload.role === 'user' && isCodexPrompt(d.payload.content)) return d.payload.content.map((b) => b?.text ?? '').join('\n');
     if (d.type === 'message') return piPrompt(d);
@@ -876,6 +903,7 @@ function clientName() {
     if (env.CODEX_THREAD_ID) return 'Codex';
     if (env.PI_SESSION_ID) return 'Pi';
     if (env.CURSOR_AGENT || env.CURSOR_TRACE_ID) return 'Cursor';
+    if (env.ANTIGRAVITY_CONVERSATION_ID) return 'Antigravity';
 
     return env.CLAUDECODE ? 'Claude Code' : 'KeepPlain CLI';
 }
@@ -1000,7 +1028,7 @@ async function folderList(limit) {
         const about = await describeSession(s);
         if (!about.prompts) continue;
         // Cursor's transcript does not say where it ran: its workspace folder's name stands for the project.
-        const cwd = all ? sessionCwd(s) : null;
+        const cwd = all ? (s.cwd !== undefined ? s.cwd : sessionCwd(s)) : null;
         const parts = s.path.split(/[\\/]/);
         const project = all ? (projectName(cwd) ?? (s.agent === 'cursor' ? (parts[parts.lastIndexOf('agent-transcripts') - 1] ?? null) : null)) : null;
         described.push({ ...s, ...about, sent: sentAt(site, s.id), ...(all ? { cwd, project } : {}) });
@@ -1679,7 +1707,7 @@ async function autoForSession(endsOne, trust) {
     if (!token) throw notConnected();
 
     const me = await api('GET', '/api/v1/me');
-    const path = autoSession(site, id)?.path ?? sessionPath(AGENT.id, id, env, AGENT.id === 'cursor' ? readCursorSidecar(id, env)?.transcript_path : null);
+    const path = autoSession(site, id)?.path ?? sessionPath(AGENT.id, id, env, hookNotes(id)?.transcript_path ?? null);
     trackSession(site, id, { own: 'on', agent: AGENT.id, path: path ?? undefined });
     console.log(`Auto mode is on for this session. It is sent to ${site} as @${me.username} by itself, every five minutes while it runs and once more ${endsOne}: to your team's space when the repository is one of your team's, else to your private Builds, where only you see them. Nothing is published. Keys, tokens and other secrets the privacy check recognises are redacted on this computer before it is sent; anything it does not recognise goes as it is, so read the draft before you publish it. Other sessions follow the auto mode for this computer (${computerSays}).${trust}`);
     console.log(`Turn it off for this session with ${run('auto')} session off. What it sent is listed in ${logFile()}.`);
@@ -2330,9 +2358,9 @@ async function handoff(what) {
     const target = what ? targets.find((t) => t.id === agentId(what) || t.id === what) : null;
     if (what && !target) throw new Failure(targets.length ? `No ${what} here. Hand to one of: ${targets.map((t) => t.id).join(', ')}.` : `No other agent found on this computer (${SESSION_KINDS}).`);
     const id = sessionId(option('session'));
-    const path = sessionPath(AGENT.id, id, env, AGENT.id === 'cursor' ? readCursorSidecar(id, env)?.transcript_path : null);
+    const path = sessionPath(AGENT.id, id, env, hookNotes(id)?.transcript_path ?? null);
     if (!path) throw new Failure(`The session's file was not found for ${AGENT.name}.`);
-    const brief = await buildBrief({ agent: AGENT.id, id, path, cwd: AGENT.id === 'cursor' ? readCursorSidecar(id, env)?.cwd ?? process.cwd() : null, env });
+    const brief = await buildBrief({ agent: AGENT.id, id, path, cwd: ['cursor', 'antigravity'].includes(AGENT.id) ? (hookNotes(id)?.cwd ?? process.cwd()) : null, env });
     if (args.includes('--print')) return console.log(brief.text);
     const file = writeBrief(AGENT.id, id, brief.text);
     const copied = args.includes('--no-copy') ? false : copyToClipboard(brief.text);
