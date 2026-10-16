@@ -13,9 +13,10 @@ import { agentSide, assertRulesReached, enable, fakeSite, fetchRules, findBin, k
 
 const agy = findBin('agy');
 /**
- * The model: LIVE_ANTIGRAVITY_MODEL, else the models `agy models` lists for the key, Flash first, one of each (its
- * -high, -medium and -low share a quota), tried in turn while the answer is a quota error: the Gemini API's free tier has
- * none for agy's default (a Pro model) nor, it turned out, for the newest Flash.
+ * The model: LIVE_ANTIGRAVITY_MODEL, else the models `agy models` lists for the key, the cheapest first (cheapestFirst:
+ * a nightly run is a few model calls, and a Flash at high effort cost about 20 cents of them), one of each (its -high,
+ * -medium and -low share a quota), tried in turn while the answer is a quota error: the Gemini API's free tier has none
+ * for agy's default (a Pro model) nor, it turned out, for the newest Flash.
  */
 const MODEL = process.env.LIVE_ANTIGRAVITY_MODEL;
 let model = MODEL ?? null;
@@ -58,7 +59,7 @@ before(async () => {
     version = v.out.trim() || version;
     const listed = await runAgent(agy, ['models'], { cwd: box.repo, env, ms: 60_000 });
     keepOutput('antigravity-models', listed);
-    models = flashFirst(listed.out);
+    models = cheapestFirst(listed.out);
     // The library, as an MCP server with the sign-in in a header: whether agy takes it is part of what is checked.
     mcp = await runAgent(agy, ['mcp', 'add', '--header', `Authorization: Bearer ${TOKEN}`, 'keepplain', `${site.url}/mcp`], { cwd: box.repo, env, ms: 30_000 });
 
@@ -97,13 +98,17 @@ const quotaOf = (error) => `no quota for ${String(error).match(/model: ([\w.-]+)
 after(() => site?.close());
 
 /**
- * The model ids `agy models` printed (an id, a tab, its name, a line each), the Flash ones first, and the ones that are
- * not for text (image, speech, live audio) left out.
+ * The model ids `agy models` printed (an id, a tab, its name, a line each), the cheapest first: Flash Lite, then Flash,
+ * then the rest; of those the oldest version first, and of each its lowest effort (less thinking is fewer tokens paid
+ * for). The ones that are not for text (image, speech, live audio) are left out.
  */
-function flashFirst(text) {
+function cheapestFirst(text) {
     const ids = text.split('\n').map((l) => l.trim().split(/\s+/)[0]).filter((id) => /^[a-z][\w.-]*\d[\w.-]*$/i.test(id) && !/image|tts|live|audio|embed/i.test(id));
+    const tier = (id) => (/flash/i.test(id) && /lite/i.test(id) ? 0 : /flash/i.test(id) ? 1 : 2);
+    const version = (id) => Number(id.match(/(\d+(?:\.\d+)?)/)?.[1] ?? Infinity);
+    const effort = (id) => ({ minimal: 0, low: 1, medium: 2, high: 3 })[id.match(/-(minimal|low|medium|high)$/i)?.[1]?.toLowerCase()] ?? 1.5;
 
-    return [...ids.filter((id) => /flash/i.test(id) && !/lite/i.test(id)), ...ids.filter((id) => /flash/i.test(id) && /lite/i.test(id)), ...ids.filter((id) => !/flash/i.test(id))];
+    return [...ids].sort((a, b) => tier(a) - tier(b) || version(a) - version(b) || effort(a) - effort(b));
 }
 
 /** Why a run got no answer, in a line: a quota the key's plan does not have, and what to do about it. */
