@@ -1,8 +1,10 @@
 name: Live agents
 
 # The real agents with this plugin (live/, npm run test:live): every night against their latest releases, so a change
-# on their side (a transcript format, a hook that stopped firing) shows here before people meet it, and by hand before
-# a release. Each agent and system is its own job: one that fails hides none of the others.
+# on their side (a transcript format, a hook that stopped firing, context from a hook the model no longer gets) shows
+# here before people meet it, and by hand before a release. The plugin goes in with `keepplain enable`, as people put it
+# in, and the stand-in site's rules have to reach the model. Each agent and system is its own job: one that fails hides
+# none of the others.
 on:
   schedule:
     - cron: '0 3 * * *'

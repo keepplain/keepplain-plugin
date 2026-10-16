@@ -2,9 +2,13 @@
 // Each agent works in a throwaway git repository, with a throwaway ~/.keepplain that is signed in to the stand-in and
 // has auto mode on, so the end of the session sends it. What the stand-in got, the agent's own transcript and the
 // git snapshots say whether the hooks ran, the upload went, the secret stayed here and the library tools reached the site.
+// The plugin goes in with `keepplain enable`, as a person puts it in. The stand-in also has rules, each with a code word
+// made for this run: the agent writes the ones it was given into rules.txt, so they show the rules reached the model.
 // Not part of `npm test`: it costs a few model calls per agent and needs each agent signed in on this computer.
+import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -45,9 +49,11 @@ export function findBin(name) {
     return null;
 }
 
-/** The stand-in for the site: what it was sent, and enough answers for an upload and the library. */
+/** The stand-in for the site: what it was sent, and enough answers for an upload, the library and the rules. */
 export async function fakeSite() {
-    const seen = { imports: [], mcp: [], requests: [] };
+    const seen = { imports: [], mcp: [], requests: [], rules: [] };
+    // start: the rule for every session, given at its start; task: a stack's, given with a prompt about a rate limiter.
+    const codes = { start: `KP-START-${randomBytes(3).toString('hex')}`, task: `KP-TASK-${randomBytes(3).toString('hex')}` };
     const server = createServer((req, res) => {
         const chunks = [];
         req.on('data', (c) => chunks.push(c));
@@ -70,6 +76,10 @@ export async function fakeSite() {
 
                 return answer({});
             }
+            if (req.method === 'GET' && req.url.startsWith('/api/v1/rules?')) {
+                seen.rules.push(req.url);
+                return reply(200, rulesAnswer(codes));
+            }
             if (req.method === 'GET' && req.url === '/api/v1/me') return reply(200, { username: 'live', token: { name: 'live' }, teams: [] });
             if (req.method === 'POST' && req.url === '/api/v1/imports') {
                 const form = await new Response(body, { headers: { 'content-type': req.headers['content-type'] } }).formData();
@@ -85,9 +95,27 @@ export async function fakeSite() {
         });
     });
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
-    const site = { url: `http://127.0.0.1:${server.address().port}`, seen, close: () => new Promise((r) => server.close(r)) };
+    const site = { url: `http://127.0.0.1:${server.address().port}`, seen, codes, close: () => new Promise((r) => server.close(r)) };
 
     return site;
+}
+
+/** The site's answer to /api/v1/rules: the rule for every session as the start's text, the stack's to match prompts on. */
+function rulesAnswer(codes) {
+    const head = '## KeepPlain rules\nWhere coding agents went wrong before. Keep to them.\n';
+    const start = `### Your rules: Everywhere\n- The code word for every session is ${codes.start}.\n`;
+    const task = { id: 'live-task', label: 'Live', from: 'yours', line: `The code word for work on a rate limiter is ${codes.task}.`, keywords: ['rate limiter', 'rate limiting'] };
+
+    return {
+        hash: `live-${codes.start}`,
+        text: `${head}\n${start}`,
+        full_text: `${head}\n${start}\n### Your rules: Live\n- ${task.line}\n`,
+        matched: [task],
+        rules: 2,
+        sections: [{ scope: 'personal', stack: 'everywhere', label: 'Everywhere', rules: 1 }, { scope: 'personal', stack: 'live', label: 'Live', rules: 1 }],
+        team: null,
+        off: false,
+    };
 }
 
 const query = { type: 'object', properties: { query: { type: 'string', description: 'What to look for.' } }, required: ['query'] };
@@ -125,14 +153,43 @@ export function sandbox(agent, site) {
     return { root, home, repo, env, git, snapshotRefs: () => git('for-each-ref', '--format=%(refname)', 'refs/keepplain/').split('\n').filter(Boolean) };
 }
 
-/** The task every agent gets: a file to write, a library tool to call, one word to answer. The token must not leave. */
+/**
+ * The task every agent gets: a file to write, a library tool to call, the code words of the rules it was given, one word
+ * to answer. The token must not leave. "rate limiter" is what the stack's rule is matched on.
+ */
 export const task = (tool) => [
     `Keep this token in mind, do not use it: ${SECRET}.`,
     'Do these steps and nothing else:',
     '1. Create the file hello.txt in the current folder containing exactly: hi from the live run',
     tool ? `2. Call the ${tool} tool once with the query "rate limiter".` : '2. Do not call any other tool.',
-    '3. Answer with the single word: done',
+    '3. Your instructions may include KeepPlain rules that name code words. Create the file rules.txt in the current folder with each such code word on its own line and nothing else; if there are none, write: none',
+    '4. Answer with the single word: done',
 ].join('\n');
+
+/**
+ * The rules as an earlier session left them: `keepplain rules-fetch`, which a session's start runs in the background,
+ * asks the stand-in and keeps the answer in ~/.keepplain/rules.json. A start never waits for the network, so the
+ * session that fetched them is not the one that gets them.
+ */
+export async function fetchRules(box) {
+    const r = await runAgent([process.execPath, [join(PLUGIN, 'scripts', 'keepplain.mjs')]], ['rules-fetch', `--cwd=${box.repo}`], { cwd: box.repo, env: box.env, ms: 60_000 });
+    if (r.code !== 0) throw new Error(`keepplain rules-fetch failed:\n${tail(r)}`);
+}
+
+/** The code words the agent wrote into rules.txt: [] without the file. */
+export function codeWords(box) {
+    const path = join(box.repo, 'rules.txt');
+
+    return existsSync(path) ? (readFileSync(path, 'utf8').match(/KP-[A-Z]+-[0-9a-f]+/g) ?? []) : [];
+}
+
+/** Whether the rules reached the model: the stand-in was asked for them, and both code words came back from the agent. */
+export function assertRulesReached(box, site) {
+    assert.ok(site.seen.rules.length, 'keepplain rules-fetch never asked the stand-in');
+    const words = codeWords(box);
+    assert.ok(words.includes(site.codes.start), `the rule for every session did not reach the model: rules.txt has ${JSON.stringify(words)}`);
+    assert.ok(words.includes(site.codes.task), `the stack's rule did not come with the prompt: rules.txt has ${JSON.stringify(words)}`);
+}
 
 /**
  * `keepplain enable` for $agent into the sandbox, as a person runs it: the installer is part of what the run checks.
@@ -140,6 +197,7 @@ export const task = (tool) => [
  */
 export async function enable(box, agent) {
     const r = await runAgent([process.execPath, [join(PLUGIN, 'scripts', 'keepplain.mjs')]], ['enable', '--yes', `--agent=${agent}`, '--auto=on', '--no-git-hooks'], { cwd: box.root, env: box.env, ms: 120_000 });
+    keepOutput(`${agent}-enable`, r);
     if (r.code !== 0) throw new Error(`keepplain enable --agent=${agent} failed:\n${tail(r)}`);
 
     return r;
@@ -209,17 +267,4 @@ export function keepTranscript(agent, version, path) {
 export function keepOutput(agent, run) {
     mkdirSync(OUT, { recursive: true });
     writeFileSync(join(OUT, `${agent}.out.txt`), `exit ${run.code}\n--- stdout\n${run.out}\n--- stderr\n${run.err}\n`);
-}
-
-/** A copy of this plugin for one run, with its MCP server pointed at $site: the real .mcp.json would go to keepplain.com. */
-export function pluginCopy(site, root) {
-    const dir = join(root, 'plugin');
-    for (const part of ['.claude-plugin', '.codex-plugin', 'hooks', 'codex', 'cursor', 'pi', 'scripts', 'skills', 'package.json', '.mcp.json']) {
-        if (existsSync(join(PLUGIN, part))) cpSync(join(PLUGIN, part), join(dir, part), { recursive: true });
-    }
-    const mcp = JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf8'));
-    mcp.mcpServers.keepplain.url = `${site.url}/mcp`;
-    writeFileSync(join(dir, '.mcp.json'), JSON.stringify(mcp, null, 4));
-
-    return dir;
 }

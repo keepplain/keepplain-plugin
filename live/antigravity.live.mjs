@@ -1,8 +1,7 @@
-// Antigravity, live: the Antigravity CLI (`agy -p`) with this plugin's hooks in a throwaway ~/.gemini (agy keeps
-// everything under the home folder, so HOME and USERPROFILE point it at the sandbox), signed in by a Gemini API key
-// (GEMINI_API_KEY, "modelProvider": "gemini"): CI has no browser for Google's sign-in. The hooks are written here as
-// `keepplain enable` will write them (docs/antigravity-plan.md on the site, A3): SessionStart, PreInvocation as the
-// prompt, PostToolUse, Stop; never PreToolUse. Antigravity has no end of a session: the Stop hook's sync sends it.
+// Antigravity, live: the Antigravity CLI (`agy -p`) with this plugin put in by `keepplain enable` (its hooks in
+// ~/.gemini/config/hooks.json, its skills) in a throwaway ~/.gemini (agy keeps everything under the home folder, so
+// HOME and USERPROFILE point it at the sandbox), signed in by a Gemini API key (GEMINI_API_KEY, "modelProvider":
+// "gemini"): CI has no browser for Google's sign-in. Antigravity has no end of a session: the Stop hook's sync sends it.
 // Antigravity is not available in some countries (Russia among them): the run has to be somewhere it is.
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -10,7 +9,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { findAntigravityTranscript, readAntigravityNotes } from '../scripts/lib/antigravity.mjs';
 import { waitFor } from '../test/helpers.mjs';
-import { agentSide, fakeSite, findBin, keepOutput, keepTranscript, parseLines, PLUGIN, runAgent, sandbox, SECRET, slimmed, TOKEN, tail, task } from './harness.mjs';
+import { agentSide, assertRulesReached, enable, fakeSite, fetchRules, findBin, keepOutput, keepTranscript, parseLines, runAgent, sandbox, SECRET, slimmed, TOKEN, tail, task } from './harness.mjs';
 
 const agy = findBin('agy');
 const MODEL = process.env.LIVE_ANTIGRAVITY_MODEL;
@@ -25,30 +24,9 @@ let id = null;
 let version = 'cli';
 let mcp = null;
 
-/**
- * The command of a hook. On Windows Antigravity runs it through `cmd /c` with every quote escaped, so a quoted path
- * reaches node with its quotes: the folder goes to pushd, which takes spaces as they are, and node runs the file by name.
- */
-function hookCommand(event) {
-    const scripts = join(PLUGIN, 'scripts');
-
-    return process.platform === 'win32' ? `pushd ${scripts} && node keepplain.mjs hook antigravity ${event}` : `node ${join(scripts, 'keepplain.mjs')} hook antigravity ${event}`;
-}
-
-/** What a sandbox's ~/.gemini needs to run without a question: the hooks, the API key's provider, the folder trusted, the onboarding done. */
+/** What a sandbox's ~/.gemini needs to run without a question, besides the plugin: the API key's provider, the folder trusted, the onboarding done. */
 function setUp(home, repo) {
     gemini = join(home, '.gemini');
-    const command = (event) => ({ type: 'command', command: hookCommand(event), timeout: 30 });
-    const hooks = {
-        keepplain: {
-            SessionStart: [command('session-start')],
-            PreInvocation: [command('prompt')],
-            PostToolUse: [{ matcher: '.*', hooks: [command('tool')] }],
-            Stop: [command('stop')],
-        },
-    };
-    mkdirSync(join(gemini, 'config'), { recursive: true });
-    writeFileSync(join(gemini, 'config', 'hooks.json'), JSON.stringify(hooks, null, 2));
     mkdirSync(join(gemini, 'antigravity-cli', 'cache'), { recursive: true });
     writeFileSync(join(gemini, 'antigravity-cli', 'settings.json'), JSON.stringify({ modelProvider: 'gemini', trustedWorkspaces: [repo] }, null, 2));
     writeFileSync(join(gemini, 'antigravity-cli', 'cache', 'onboarding.json'), JSON.stringify({ consumerOnboardingComplete: true, enterpriseOnboardingComplete: false, onboardingComplete: true }));
@@ -63,6 +41,9 @@ before(async () => {
     setUp(home, box.repo);
     env = { ...box.env, HOME: home, USERPROFILE: home, KEEPPLAIN_GEMINI_DIR: join(home, '.gemini') };
     delete env.ANTIGRAVITY_CONVERSATION_ID;
+    box.env = env;
+    await enable(box, 'antigravity');
+    await fetchRules(box);
 
     const v = await runAgent(agy, ['--version'], { cwd: box.repo, env, ms: 30_000 });
     version = v.out.trim() || version;
@@ -89,6 +70,13 @@ function hookErrors() {
     return readdirSync(dir).flatMap((name) => readFileSync(join(dir, name), 'utf8').split('\n')).filter((l) => /Failed to parse hooks file|failed to call custom|jsonhook__keepplain.*(?:failed|error)|invalid UTF-8/i.test(l));
 }
 
+test('Antigravity: keepplain enable put the hooks and skills in', { skip: why }, () => {
+    const hooks = JSON.parse(readFileSync(join(gemini, 'config', 'hooks.json'), 'utf8')).keepplain ?? {};
+    // PreToolUse is never ours: a hook of it that fails blocks every tool.
+    assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUse', 'PreInvocation', 'SessionStart', 'Stop']);
+    assert.ok(existsSync(join(gemini, 'antigravity-cli', 'skills', 'keepplain-lookup', 'SKILL.md')), 'no keepplain-lookup skill');
+});
+
 test('Antigravity ran to its end', { skip: why }, () => {
     assert.ok(answer, `no JSON answer\n${tail(run)}`);
     assert.ok(id, `no conversation_id\n${tail(run)}`);
@@ -105,6 +93,11 @@ test('Antigravity: the hooks ran, and none of them failed', { skip: why }, () =>
     assert.equal(notes.cwd.toLowerCase(), box.repo.toLowerCase(), 'the workspace the hooks were told');
     assert.ok(notes.model, 'no model in the notes');
     assert.deepEqual(hookErrors(), [], 'agy logged a failing hook');
+});
+
+test('Antigravity: the rules reached the model', { skip: why }, () => {
+    // The start's rules and the prompt's go in as steps injected before the model's call (antigravityOutput).
+    assertRulesReached(box, site);
 });
 
 test('Antigravity: the library tool reached the site with the sign-in', { skip: why }, () => {
