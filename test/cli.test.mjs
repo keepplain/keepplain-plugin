@@ -1,7 +1,7 @@
 // preview → send → whoami against a stand-in for the KeepPlain API, with a throwaway Claude Code config folder.
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, request as forward } from 'node:http';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -265,7 +265,7 @@ test('preview prints what will go, then send uploads exactly that and waits for 
     // The files the agent changed go as diffs, an env file by its name only (plan, stage 11.1).
     assert.match(preview.out, /Code: +4 files \(\+323 −2\), as diffs; \.env by name only/);
     assert.ok(
-        preview.out.includes('Git:        https://github.com/mara/shop (linked on the Build only if the repository is public), branch main; 2 commits in this session, 1 file +2 −0. Commit titles are sent, not the commits.'),
+        preview.out.includes('Git:        https://github.com/mara/shop (linked on the Build only if the repository is public), branch main; 2 commits in this session, 1 file +2 −0. Commit titles, times and the names of their files are sent, not the commits.'),
         preview.out,
     );
     assert.match(preview.out, /Privacy check, on this computer: no keys, tokens or addresses it recognises\./);
@@ -300,6 +300,8 @@ test('preview prints what will go, then send uploads exactly that and waits for 
     assert.equal(git.remote, 'https://github.com/mara/shop');
     assert.equal(git.head_start, repo.hashes[0]);
     assert.deepEqual(git.commits.subjects, ['Cover the limiter with tests', 'Add a limiter keyed by email']);
+    // When each commit was made and its files, so the site can place one made outside the agent's shell.
+    assert.deepEqual([git.commits.files, git.commits.times.map((t) => typeof t)], [[['app.txt'], ['app.txt']], ['number', 'number']]);
     // The check ran here: the site is told so, with counts only.
     const privacy = JSON.parse(received.toString('utf8').match(/name="privacy"\r\n\r\n(.*)\r\n/)[1]);
     assert.equal(privacy.v, 1);
@@ -804,6 +806,8 @@ test('a Codex session: found by CODEX_THREAD_ID, HEAD at the start from session_
     const skill = { timestamp: '2026-09-01T10:05:00.000Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<skill>\n<name>keepplain:build</name>\n<path>/p/codex/skills/build/SKILL.md</path>\nCODEX SKILL BODY\n</skill>' }] } };
     writeFileSync(rollout, [JSON.stringify(meta), ...fixture, JSON.stringify(skill)].join('\n') + '\n');
     const codex = { CODEX_HOME: codexHome, CODEX_THREAD_ID: thread };
+    // A commit's file that holds a word of the person's list stays on this computer, as the folder does.
+    writeFileSync(join(home, 'ct', 'privacy.json'), JSON.stringify({ redact: ['app'] }));
 
     const preview = await cli(['preview', '--agent=codex'], codex);
     assert.equal(preview.ok, true, preview.out);
@@ -817,6 +821,7 @@ test('a Codex session: found by CODEX_THREAD_ID, HEAD at the start from session_
 
     // Escalated commands can retain this flag even when the network is available.
     const send = await cli(['send', '--agent=codex'], { ...codex, CODEX_SANDBOX_NETWORK_DISABLED: '1' });
+    rmSync(join(home, 'ct', 'privacy.json'), { force: true });
     assert.equal(send.ok, true, send.out);
     const body = received.toString('latin1');
     assert.match(body, /name="agent"\r\n\r\ncodex/);
@@ -824,6 +829,7 @@ test('a Codex session: found by CODEX_THREAD_ID, HEAD at the start from session_
     const git = JSON.parse(received.toString('utf8').match(/name="git"\r\n\r\n(.*)\r\n/)[1]);
     assert.equal(git.head_start, repo.hashes[0]);
     assert.equal(git.head_start_estimated, undefined);
+    assert.deepEqual([git.commits.shas.length, git.commits.files], [2, [[], []]]);
     assert.ok(received.includes(gz));
 });
 

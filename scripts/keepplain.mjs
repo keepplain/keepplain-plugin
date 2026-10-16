@@ -2158,7 +2158,7 @@ function describeGit(git) {
     const files = git.shortstat?.files;
     const size = git.shortstat ? `, ${files} file${files === 1 ? '' : 's'} +${git.shortstat.insertions} −${git.shortstat.deletions}` : '';
 
-    return `${where}${git.branch ? `, branch ${git.branch}` : ''}; ${made}${size}. Commit titles are sent, not the commits.`;
+    return `${where}${git.branch ? `, branch ${git.branch}` : ''}; ${made}${size}. Commit titles, times and the names of their files are sent, not the commits.`;
 }
 
 /** Commit titles and the branch name go as they are written: a token pasted into one is redacted like the session. */
@@ -2172,7 +2172,12 @@ function checkedGit(git, privacy) {
         ...git,
         prefix,
         branch: git.branch ? privacy.text(git.branch) : git.branch,
-        commits: { ...git.commits, subjects: (git.commits?.subjects ?? []).map((s) => privacy.text(s)) },
+        commits: {
+            ...git.commits,
+            subjects: (git.commits?.subjects ?? []).map((s) => privacy.text(s)),
+            // A commit's file that names a word of the list stays here, as the folder does.
+            ...(git.commits?.files ? { files: git.commits.files.map((paths) => paths.filter((p) => privacy.text(p) === p)) } : {}),
+        },
     };
 }
 

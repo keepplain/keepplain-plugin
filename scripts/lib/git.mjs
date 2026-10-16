@@ -12,6 +12,8 @@ import { basename, dirname, resolve } from 'node:path';
 export const MAX_SUBJECTS = 20;
 // More hashes than titles: the site matches a team repository's commits to the session by them (KeepPlain plan, stage 12.1).
 export const MAX_SHAS = 50;
+// Files of one commit sent with it: the site places a commit made outside the agent's shell at the agent's last edit of them.
+export const MAX_COMMIT_FILES = 100;
 
 function git(cwd, args) {
     try {
@@ -19,6 +21,22 @@ function git(cwd, args) {
     } catch {
         return null;
     }
+}
+
+/**
+ * When each commit of the range was committed and which files it changed, as paths from the repository's root, by its
+ * hash. Unquoted, so a name in another script stays readable; a merge lists none.
+ */
+function commitDetails(cwd, range) {
+    const text = git(cwd, ['-c', 'core.quotePath=false', 'log', '--format=%x00%H%x09%ct', '--name-only', '--no-renames', `--max-count=${MAX_SHAS}`, range]) ?? '';
+    const details = new Map();
+    for (const record of text.split('\0').slice(1)) {
+        const [head, ...lines] = record.split('\n');
+        const [sha, at] = head.split('\t');
+        details.set(sha, { at: Number(at) || null, files: lines.map((line) => line.trim()).filter(Boolean).slice(0, MAX_COMMIT_FILES) });
+    }
+
+    return details;
 }
 
 export function currentHead(cwd) {
@@ -185,11 +203,18 @@ export function gitContext(cwd, headStart, startedAt, past = null) {
         // Hashes next to the titles: the site links each commit on GitHub (KeepPlain plan, stage 12.1).
         const log = git(cwd, ['log', '--format=%H%x09%s', `--max-count=${MAX_SHAS}`, range]);
         const entries = log ? log.split('\n').map((l) => l.split('\t')) : [];
+        const shas = entries.map(([sha]) => sha);
+        const details = commitDetails(cwd, range);
         context.commits = {
             count: Number(git(cwd, ['rev-list', '--count', range]) ?? 0),
             subjects: entries.slice(0, MAX_SUBJECTS).map(([, ...s]) => s.join('\t').slice(0, 200)),
             // The first ones in the order of the titles.
-            shas: entries.map(([sha]) => sha),
+            shas,
+            // In the order of the hashes, when each was committed (seconds) and the files it changed: a commit made by
+            // hand or by a client's button, which the session has no turn for, is placed at the agent's last edit of its
+            // files before it.
+            times: shas.map((sha) => details.get(sha)?.at ?? null),
+            files: shas.map((sha) => details.get(sha)?.files ?? []),
         };
         context.shortstat = parseShortstat(git(cwd, ['diff', '--shortstat', headStart, headEnd]));
     }

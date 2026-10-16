@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { folderGitContexts, gitContext, MAX_SHAS, MAX_SUBJECTS, normalizeRemote, parseShortstat, projectOf, remoteIdentity, worktrees } from '../scripts/lib/git.mjs';
+import { folderGitContexts, gitContext, MAX_COMMIT_FILES, MAX_SHAS, MAX_SUBJECTS, normalizeRemote, parseShortstat, projectOf, remoteIdentity, worktrees } from '../scripts/lib/git.mjs';
 import { readSidecar } from '../scripts/lib/sidecar.mjs';
 import { hookCommand, makeRepo } from './helpers.mjs';
 
@@ -31,9 +31,31 @@ test('the commits made since HEAD at the start of the session', () => {
         branch: 'main',
         head_start: hashes[0],
         head_end: hashes[2],
-        commits: { count: 2, subjects: ['Cover the limiter with tests', 'Add a limiter keyed by email'], shas: [hashes[2], hashes[1]] },
+        commits: {
+            count: 2,
+            subjects: ['Cover the limiter with tests', 'Add a limiter keyed by email'],
+            shas: [hashes[2], hashes[1]],
+            // When each was committed and its files, so the site can place one committed outside the agent's shell.
+            times: [Date.parse('2026-09-01T10:40:00Z') / 1000, Date.parse('2026-09-01T10:10:00Z') / 1000],
+            files: [['app.txt'], ['app.txt']],
+        },
         shortstat: { files: 1, insertions: 2, deletions: 0 },
     });
+});
+
+test("a commit's files are named from the repository's root, unquoted, at most 100", () => {
+    const { dir, hashes } = makeRepo();
+    mkdirSync(join(dir, 'docs', 'store'), { recursive: true });
+    for (let i = 0; i < 105; i++) writeFileSync(join(dir, 'docs', 'store', `листинг-${String(i).padStart(3, '0')}.md`), `${i}\n`);
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'add', '.'], { cwd: dir });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Store listing'], { cwd: dir });
+
+    const { commits } = gitContext(join(dir, 'docs'), hashes[2], null);
+
+    assert.equal(commits.files[0].length, MAX_COMMIT_FILES);
+    assert.equal(commits.files[0][0], 'docs/store/листинг-000.md');
+    assert.equal(commits.files.length, commits.shas.length);
+    assert.equal(typeof commits.times[0], 'number');
 });
 
 test('a session in a folder of the repository says where the folder is, one at the root says nothing', () => {
