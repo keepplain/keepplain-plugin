@@ -17,6 +17,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
+import { antigravityInstalled } from './antigravity-install.mjs';
+import { geminiHome, SURFACES } from './antigravity.mjs';
 import { home } from './credentials.mjs';
 import { cursorInstalled, cursorMcpServers, removeCursorMcpServer } from './cursor-install.mjs';
 import { cursorHome } from './cursor.mjs';
@@ -73,7 +75,8 @@ function desktopClaudeCli(env) {
 
 /**
  * Every agent: {id, name, cli (a path or null), home, present}; native: the plugin goes in as files of the agent's own
- * folder (Cursor), so it needs no command of the agent's to install.
+ * folder (Cursor, Antigravity), so it needs no command of the agent's to install. Antigravity is there when its CLI is
+ * in PATH or one of its surfaces (the App, the CLI, the IDE) has its folder in ~/.gemini.
  */
 export function detectAgents(env = process.env) {
     const exe = process.platform === 'win32' ? '.exe' : '';
@@ -83,12 +86,15 @@ export function detectAgents(env = process.env) {
     const codexCli = findProgram('codex', env) ?? (existsSync(desktopCodex) ? desktopCodex : null);
     const cursorCli = findProgram('cursor-agent', env) ?? cursorAgentCli(env);
     const piCli = findProgram('pi', env);
+    const agyCli = findProgram('agy', env);
+    const antigravityHome = join(geminiHome(env), 'antigravity-cli');
 
     return [
         { id: 'claude-code', name: 'Claude Code', cli: claudeCli, home: claudeHome, present: Boolean(claudeCli) || existsSync(claudeHome) },
         { id: 'codex', name: 'Codex', cli: codexCli, home: codexHome(env), present: Boolean(codexCli) || existsSync(codexHome(env)) },
         { id: 'cursor', name: 'Cursor', cli: cursorCli, home: cursorHome(env), native: true, present: Boolean(cursorCli) || existsSync(cursorHome(env)) },
         { id: 'pi', name: 'Pi', cli: piCli, home: piHome(env), present: Boolean(piCli) || existsSync(piHome(env)) },
+        { id: 'antigravity', name: 'Antigravity', cli: agyCli, home: antigravityHome, native: true, present: Boolean(agyCli) || SURFACES.some((s) => existsSync(join(geminiHome(env), s))) },
     ];
 }
 
@@ -200,9 +206,19 @@ export function appDirectoryPlugin(env = process.env) {
     return null;
 }
 
+/** The version `keepplain enable` laid an agent's files out in, from enable.json; null when unknown. */
+function enabledVersion(agent, env) {
+    try {
+        return JSON.parse(readFileSync(join(home(env), 'enable.json'), 'utf8'))[agent]?.version ?? null;
+    } catch {
+        return null;
+    }
+}
+
 /** The KeepPlain plugins installed in the agent: [{id, version, marketplace}] (empty when it cannot tell). */
 export function installedPlugins(agent, env = process.env) {
     if (agent.id === 'pi') return piPackages(env);
+    if (agent.id === 'antigravity') return antigravityInstalled(env, { id: PLUGIN_ID, marketplace: MARKETPLACE, version: enabledVersion('antigravity', env) });
     if (agent.id === 'cursor') {
         // The files are ours by their content; the version they were laid out in is in enable.json.
         let version = null;
@@ -239,7 +255,8 @@ const isOurServer = (url, site) => typeof url === 'string' && (url.replace(/\/+$
  * CLAUDE_CONFIG_DIR when that is set): user scope at the top, local scope under each project. Codex in config.toml.
  */
 export function manualMcpServers(agent, site, env = process.env) {
-    if (agent.id === 'pi') return [];
+    // Pi and Antigravity reach the library through the program (mcp-call): no server of theirs is ours to find.
+    if (agent.id === 'pi' || agent.id === 'antigravity') return [];
     if (agent.id === 'cursor') return cursorMcpServers(site, env);
     if (agent.id === 'claude-code') {
         const file = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, '.claude.json') : join(homedir(), '.claude.json');

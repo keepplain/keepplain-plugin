@@ -172,10 +172,11 @@ export function pruneHandoffs(dir = home(), now = Date.now()) {
 export function handoffTargets(current, env = process.env) {
     return detectAgents(env)
         .filter((a) => a.present && a.id !== current)
-        .map((a) => ({ id: a.id, name: a.name, cli: a.cli ? (a.id === 'cursor' ? 'cursor-agent' : a.id === 'claude-code' ? 'claude' : a.id) : null }));
+        .map((a) => ({ id: a.id, name: a.name, cli: a.cli ? (CLI_NAMES[a.id] ?? a.id).split(' ')[0] : null }));
 }
 
-const CLI_NAMES = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', cursor: 'cursor-agent' };
+/** How each agent is started with a first message: Antigravity takes it after -i, to stay open after it. */
+const CLI_NAMES = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', cursor: 'cursor-agent', antigravity: 'agy -i' };
 
 /** The shell line that starts the target with the brief as its first message. Null for a target with no CLI (Cursor's IDE). */
 export function startCommand(target, file, platform = process.platform) {
@@ -202,7 +203,7 @@ export function copyToClipboard(text, platform = process.platform) {
 }
 
 /** What an agent tells the commands it runs about itself: a window opened from one is not that agent's session. */
-const AGENT_VARIABLES = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CODEX_THREAD_ID', 'PI_SESSION_ID', 'PI_SESSION_FILE', 'CURSOR_AGENT', 'CURSOR_TRACE_ID', 'CURSOR_TRANSCRIPT_PATH'];
+const AGENT_VARIABLES = ['CLAUDECODE', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_SESSION_ID', 'CLAUDE_CODE_ENTRYPOINT', 'CODEX_THREAD_ID', 'PI_SESSION_ID', 'PI_SESSION_FILE', 'CURSOR_AGENT', 'CURSOR_TRACE_ID', 'CURSOR_TRANSCRIPT_PATH', 'ANTIGRAVITY_CONVERSATION_ID'];
 
 /**
  * The environment of the terminal handoff opens, without the agent's own variables: the next agent and the person in

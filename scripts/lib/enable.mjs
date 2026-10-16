@@ -6,7 +6,7 @@
  * keepplain@keepplain-local: `claude plugin marketplace add` and `claude plugin install`, `codex plugin marketplace
  * add` and `codex plugin add`, `pi install` of the package it laid out (a local package is loaded where it is: laying it
  * out again updates it). Cursor has no command for it: its hooks, skills and library entry are files of ~/.cursor
- * (lib/cursor-install.mjs). It says what it found and what it will do before it does anything, and asks, unless
+ * (lib/cursor-install.mjs), and Antigravity's hooks and skills files of ~/.gemini (lib/antigravity-install.mjs). It says what it found and what it will do before it does anything, and asks, unless
  * --yes. On the way:
  *   - the plugin from the GitHub marketplace (keepplain@keepplain) is replaced, or its hooks and snapshots would
  *     run twice; for Pi, the git package of the README;
@@ -32,6 +32,7 @@ import { createInterface } from 'node:readline/promises';
 import { AGENT_IDS, agentId } from './agent.mjs';
 import { detectAgents, installedPlugins, manualMcpServers, piPackageDir, removeMcpServer, runCli } from './agents.mjs';
 import { autoMode, inBackground, setAutoMode } from './auto.mjs';
+import { manualHookLines as antigravityHookLines, installAntigravity, SKILLS as ANTIGRAVITY_SKILLS, uninstallAntigravity } from './antigravity-install.mjs';
 import { manualHookLines as cursorHookLines, installCursor, SKILLS as CURSOR_SKILLS, uninstallCursor } from './cursor-install.mjs';
 import { hooksOf, installedHooks, installHooks, manualHookLines, removeHooks, TRAILER } from './githooks.mjs';
 import { home, savedUsername, writePrivate } from './credentials.mjs';
@@ -57,6 +58,7 @@ const RESTART = {
     codex: 'Start a new Codex session',
     cursor: 'Restart Cursor (or run "Developer: Reload Window")',
     pi: 'Type /reload in Pi, or start it again',
+    antigravity: 'Start a new Antigravity conversation',
 };
 
 /**
@@ -74,7 +76,7 @@ export async function enable({ site, version, interactive, flags, json = false, 
     if (Number.isNaN(pastWindow)) throw new Failure('--import-days takes a whole number of days from 1 to 90.');
 
     const agents = chosenAgents(flags.agents).filter((a) => a.present);
-    if (!agents.length) throw new Failure('Found none of Claude Code, Codex, Cursor and Pi on this computer. Install one of them, then run keepplain enable again.');
+    if (!agents.length) throw new Failure('Found none of Claude Code, Codex, Cursor, Pi and Antigravity on this computer. Install one of them, then run keepplain enable again.');
 
     const prompt = interactive && !json ? createInterface({ input: process.stdin, output: process.stdout }) : null;
     // --json (the desktop app): the steps as events, the closing lines as notes of the last one.
@@ -316,6 +318,7 @@ export async function disable({ interactive, flags, json = false }) {
         ...state.filter((s) => s.ours).map((s) => {
             if (s.agent.id === 'cursor') return `Cursor: take the hooks and skills${addedLibrary ? ' and the library entry' : ''} out of ~/.cursor`;
             if (s.agent.id === 'pi') return `Pi: remove the package ${piPackageDir()}`;
+            if (s.agent.id === 'antigravity') return 'Antigravity: take the hooks and skills out of ~/.gemini';
 
             return `${s.agent.name}: uninstall ${PLUGIN_ID} and its marketplace`;
         }),
@@ -346,6 +349,10 @@ export async function disable({ interactive, flags, json = false }) {
                 if (!ours) continue;
                 uninstallCursor({ removeServer: addedLibrary });
                 if (!whole) writeChoices(Object.fromEntries(Object.entries(readChoices()).filter(([key]) => key !== 'cursor')));
+            } else if (agent.id === 'antigravity') {
+                if (!ours) continue;
+                uninstallAntigravity();
+                if (!whole) writeChoices(Object.fromEntries(Object.entries(readChoices()).filter(([key]) => key !== 'antigravity')));
             } else if (agent.id === 'pi') {
                 if (!ours) continue;
                 step(agent, ['remove', ours.removeAs ?? ours.source]);
@@ -394,6 +401,7 @@ export function status({ site, version }) {
             notes.push(`${p.id} ${p.version ?? ''}`.trim() + from + (p === ours && p.version && p.version !== version ? ` (older than this file: keepplain enable)` : ''));
         }
         if (ours && agent.id === 'cursor') notes.push(`hooks ${ours.hooks ? 'in ~/.cursor/hooks.json' : 'missing (keepplain enable)'}, ${ours.skills.length} of ${CURSOR_SKILLS.length} skills`);
+        if (ours && agent.id === 'antigravity') notes.push(`hooks ${ours.hooks ? 'in ~/.gemini/config/hooks.json' : 'missing (keepplain enable)'}, ${ours.skills.length} of ${ANTIGRAVITY_SKILLS.length} skills`);
         if (plugins.length > 1) notes.push('two KeepPlain plugins: their hooks run twice (keepplain enable keeps one)');
         const servers = manualMcpServers(agent, site);
         if (servers.length) notes.push(`MCP server ${agent.id === 'cursor' ? 'in ~/.cursor/mcp.json' : 'added by hand'}: ${servers.map(describeServer).join(', ')}`);
@@ -424,6 +432,7 @@ export function agentStatus({ site, version }) {
         if (!installable(agent)) notes.push(`Its command is not in PATH, so its plugins cannot be listed or installed from here. ${manualSteps(agent)}`);
         if (plugins.length > 1) notes.push('Two KeepPlain plugins: their hooks run twice. Connecting it again keeps one.');
         if (ours && agent.id === 'cursor' && !ours.hooks) notes.push('Its hooks are missing from ~/.cursor/hooks.json: connect it again.');
+        if (ours && agent.id === 'antigravity' && !ours.hooks) notes.push('Its hooks are missing from ~/.gemini/config/hooks.json: connect it again.');
         if (plugins.some((p) => p.marketplace === SYNCED)) notes.push(`${DIRECTORY}: remove it on claude.ai, in Customize → Plugins.`);
         else if (plugins.length && !ours) notes.push(`Installed from elsewhere (${plugins.map((p) => p.id).join(', ')}): connecting it here replaces it.`);
 
@@ -446,7 +455,7 @@ function chosenAgents(names) {
     if (!names?.length) return all;
     const wanted = names.map((n) => agentId(n) ?? n);
     const unknown = wanted.filter((n) => !all.some((a) => a.id === n));
-    if (unknown.length) throw new Failure(`--agent takes claude-code, codex, cursor or pi, not ${unknown.join(', ')}.`);
+    if (unknown.length) throw new Failure(`--agent takes claude-code, codex, cursor, pi or antigravity, not ${unknown.join(', ')}.`);
 
     return all.filter((a) => wanted.includes(a.id));
 }
@@ -463,6 +472,7 @@ function installLine(s, mcp) {
     const verb = ours ? 'update' : 'install';
     if (agent.id === 'cursor') return `Cursor: ${verb} the hooks (${'~/.cursor/hooks.json'}), the skills (~/.cursor/skills/keepplain-*)${s.servers.length && mcp === 'keep' ? '' : ' and the library (~/.cursor/mcp.json)'}`;
     if (agent.id === 'pi') return `Pi: ${verb} the package ${piPackageDir()} (pi install)`;
+    if (agent.id === 'antigravity') return `Antigravity: ${verb} the hooks (~/.gemini/config/hooks.json) and the skills (~/.gemini/antigravity-cli/skills/keepplain-*)`;
 
     return `${agent.name}: ${verb} ${PLUGIN_ID}${s.servers.length && mcp === 'keep' ? ', without its MCP server' : ''}`;
 }
@@ -470,7 +480,9 @@ function installLine(s, mcp) {
 const installedLine = (agent, version) =>
     agent.id === 'cursor'
         ? `Cursor: KeepPlain ${version} is in ~/.cursor (hooks, skills, library). ${RESTART.cursor} to load it.`
-        : `${agent.name}: ${PLUGIN_ID} ${version} is installed. ${RESTART[agent.id]} to load it.`;
+        : agent.id === 'antigravity'
+          ? `Antigravity: KeepPlain ${version} is in ~/.gemini (hooks, skills; the library through /keepplain-lookup). ${RESTART.antigravity} to load it.`
+          : `${agent.name}: ${PLUGIN_ID} ${version} is installed. ${RESTART[agent.id]} to load it.`;
 
 /**
  * Puts the plugin into an agent from what layOut wrote: the plugin systems of Claude Code and Codex from the local
@@ -478,6 +490,7 @@ const installedLine = (agent, version) =>
  */
 function installPlugin(agent, ours, { quiet = false, site, version, mcp = {} } = {}) {
     if (agent.id === 'cursor') return installCursorFiles({ site, version, mcp });
+    if (agent.id === 'antigravity') return installAntigravityFiles({ site, version, mcp });
     const run = quiet ? (a) => runCli(agent.cli, a) : (a) => step(agent, a);
     if (agent.id === 'pi') {
         // A local package is loaded where it is: laid out again, it is updated. Installed once.
@@ -512,6 +525,19 @@ function installCursorFiles({ site, version, mcp }) {
     if (done.hooks === 'unreadable') notes.push(`Cursor: ~/.cursor/hooks.json could not be read (comments, or a syntax error), so it was left as it is. Add these hooks by hand:\n${cursorHookLines(run)}`);
     if (done.mcp === 'added') notes.push('Cursor: the library is in ~/.cursor/mcp.json. Open Cursor → Settings → MCP → keepplain and press Connect: it signs in through the browser.');
     if (done.mcp === 'unreadable') notes.push(`Cursor: ~/.cursor/mcp.json could not be read, so the library was not added. Add this server by hand: {"mcpServers": {"keepplain": {"url": "${site}/mcp"}}}`);
+
+    return notes;
+}
+
+/** Antigravity's hooks and skills, written into ~/.gemini; what could not be is said, with the lines to add. */
+function installAntigravityFiles({ site, version, mcp }) {
+    const files = pluginFiles(pluginSources(), { program: selfProgram(), version, site, mcp });
+    const done = installAntigravity({ files, program: selfProgram() });
+    writeChoices({ ...readChoices(), antigravity: { version } });
+
+    const notes = [];
+    for (const folder of done.skipped) notes.push(`Antigravity: ~/.gemini/antigravity-cli/skills/${folder} was made by someone else, so it was left as it is: /${folder} is not KeepPlain's.`);
+    if (done.hooks === 'unreadable') notes.push(`Antigravity: ~/.gemini/config/hooks.json could not be read (a syntax error), so it was left as it is. Add these hooks to it by hand:\n${antigravityHookLines(selfProgram())}`);
 
     return notes;
 }

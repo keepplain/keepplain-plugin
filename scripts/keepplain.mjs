@@ -1530,7 +1530,8 @@ async function useAgent() {
     }
     if (!TERMINAL) throw new Failure('Say which agent it is for: --agent=claude, --agent=codex, --agent=cursor or --agent=pi.');
 
-    const here = detectAgents().filter((a) => a.present);
+    // Only the agents a playbook is laid out for (lib/playbooks.mjs): Antigravity's is not yet.
+    const here = detectAgents().filter((a) => a.present && agentOf(a.id));
     const withPlugin = here.filter((a) => installedPlugins(a).length);
     const candidates = withPlugin.length ? withPlugin : here;
     if (candidates.length === 1) return agentOf(candidates[0].id);

@@ -246,7 +246,7 @@ test('the agents are asked for by name, and an unknown one is refused', async ()
     assert.equal(both.ok, true, both.out);
     const unknown = await cli(['enable', '--yes', '--agent=windsurf']);
     assert.equal(unknown.ok, false);
-    assert.match(unknown.out, /--agent takes claude-code, codex, cursor or pi, not windsurf\./);
+    assert.match(unknown.out, /--agent takes claude-code, codex, cursor, pi or antigravity, not windsurf\./);
 });
 
 test('auto mode is one choice for Pi and Cursor, kept for each of them', async () => {

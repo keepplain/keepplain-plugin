@@ -13,10 +13,13 @@
  *   headersHelper       sh, or cmd.exe on Windows
  *   Codex hooks, skills sh, or PowerShell on Windows (`& '…'`: a quoted path alone is a string there, not a call)
  *   Cursor hooks, skills  the same as Codex's: Cursor runs them through PowerShell on Windows
+ *   Antigravity skills  the same: its run_command is PowerShell on Windows
+ *   Antigravity hooks   antigravityCommand: on Windows `cmd /c` with every quote escaped, so no quotes at all
  *   Pi's extension     the program as a list (command and arguments), spawned without a shell
  *
  * The Pi package (pi/) is installed where it is laid out, with `pi install`; Cursor's skills (cursor/skills) are copied
- * into ~/.cursor/skills by enable (lib/cursor-install.mjs) together with the hooks it writes there.
+ * into ~/.cursor/skills by enable (lib/cursor-install.mjs) together with the hooks it writes there, and Antigravity's
+ * (antigravity/skills) into ~/.gemini/antigravity-cli/skills (lib/antigravity-install.mjs).
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -26,7 +29,7 @@ export const MARKETPLACE = 'keepplain-local';
 export const PLUGIN_ID = `keepplain@${MARKETPLACE}`;
 
 const SOURCE_FILES = ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json', 'hooks/hooks.json', 'hooks/handoff.tsx', 'codex/hooks.json'];
-const SOURCE_DIRS = ['skills', 'codex/skills', 'cursor/skills', 'pi/extensions'];
+const SOURCE_DIRS = ['skills', 'codex/skills', 'cursor/skills', 'antigravity/skills', 'pi/extensions'];
 
 /** The repository files the plugin is made from, by path: built into the single file, or read from the repository. */
 export function pluginSources() {
@@ -54,6 +57,26 @@ export const shCommand = (parts) => parts.map((p) => `'${p.replace(/'/g, `'\\''`
 export const psCommand = (parts) => `& ${parts.map((p) => `'${p.replace(/'/g, "''")}'`).join(' ')}`;
 /** cmd.exe: double quotes; a Windows path holds none. */
 export const cmdCommand = (parts) => parts.map((p) => (/[\s&^|<>()"]/.test(p) ? `"${p}"` : p)).join(' ');
+
+/**
+ * The command line of an Antigravity hook: $program (the file, or node and the script) with $args. On Windows Antigravity
+ * runs it through `cmd /c` and escapes every quote in it (checked on its CLI 1.4.0), so a quoted path reaches the
+ * program with its quotes: the folder of the file goes to pushd, which takes spaces as they are, and the file is run by
+ * its name from there (node by its path when that has no space, else from PATH). Elsewhere, words that need no quotes
+ * go without them: whether a shell reads the line there is not known yet.
+ */
+export function antigravityCommand(program, args, windows = process.platform === 'win32') {
+    if (!windows) {
+        const parts = [...program, ...args];
+
+        return parts.every((p) => /^[\w@%+=:,./-]+$/.test(p)) ? parts.join(' ') : shCommand(parts);
+    }
+    const file = program.at(-1);
+    const at = Math.max(file.lastIndexOf('\\'), file.lastIndexOf('/'));
+    const node = program.length > 1 ? `${/\s/.test(program[0]) ? 'node' : program[0]} ` : '';
+
+    return `pushd ${file.slice(0, at)} && ${node}${file.slice(at + 1)} ${args.join(' ')}`;
+}
 
 /**
  * The files of the plugin, by path. $program is what runs keepplain: the file, or node and the script.
@@ -137,6 +160,7 @@ export function pluginFiles(sources, { program, version, site, mcp = {}, windows
         if (path.startsWith('skills/')) files[path] = claudeSkill(text, claudeRun, windows);
         else if (path.startsWith('codex/skills/')) files[path] = codexSkill(text, codexRun);
         else if (path.startsWith('cursor/skills/')) files[path] = codexSkill(text, cursorRun);
+        else if (path.startsWith('antigravity/skills/')) files[path] = codexSkill(text, codexRun);
     }
     for (const [path, text] of Object.entries(files)) {
         if (/\$\{CLAUDE_PLUGIN_ROOT\}|<plugin>|\bnode "/.test(text)) throw new Error(`The plugin's ${path} still calls the script: this build cannot lay it out.`);
