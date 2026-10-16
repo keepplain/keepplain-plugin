@@ -1112,7 +1112,7 @@ async function suggestContinues(chosen) {
 }
 
 /**
- * `use <build>` (plan: library, stage 22.3): a Build's playbook into this repository, for Claude Code or Codex. Without
+ * `use <build>` (plan: library, stage 22.3): a Build's playbook into this repository, for any agent of lib/playbooks.mjs. Without
  * --write it only shows: the whole text, where it goes, and what changed since the version written here before. The
  * plugin's `use` skill shows that to the person and asks before it runs --write; in a terminal the command asks
  * itself. Nothing here follows the playbook: it is another developer's experience, for the person to read first.
@@ -1525,22 +1525,21 @@ async function useAgent() {
     const given = option('agent');
     if (given) {
         const agent = agentOf(given);
-        if (!agent) throw new Failure(`--agent takes claude, codex, cursor or pi, not "${given}".`);
+        if (!agent) throw new Failure(`--agent takes claude, codex, cursor, pi or antigravity, not "${given}".`);
         return agent;
     }
-    if (!TERMINAL) throw new Failure('Say which agent it is for: --agent=claude, --agent=codex, --agent=cursor or --agent=pi.');
+    if (!TERMINAL) throw new Failure('Say which agent it is for: --agent=claude, --agent=codex, --agent=cursor, --agent=pi or --agent=antigravity.');
 
-    // Only the agents a playbook is laid out for (lib/playbooks.mjs): Antigravity's is not yet.
     const here = detectAgents().filter((a) => a.present && agentOf(a.id));
     const withPlugin = here.filter((a) => installedPlugins(a).length);
     const candidates = withPlugin.length ? withPlugin : here;
     if (candidates.length === 1) return agentOf(candidates[0].id);
 
     const prompt = createPrompt({ input: process.stdin, output: process.stdout });
-    const answer = (await prompt.question('For Claude Code, Codex, Cursor or Pi? [c/x/u/p] ')).trim().toLowerCase();
+    const answer = (await prompt.question('For Claude Code, Codex, Cursor, Pi or Antigravity? [c/x/u/p/a] ')).trim().toLowerCase();
     prompt.close();
-    const agent = { c: 'claude', claude: 'claude', x: 'codex', codex: 'codex', u: 'cursor', cursor: 'cursor', p: 'pi', pi: 'pi' }[answer];
-    if (!agent) throw new Failure('Nothing was written. Name the agent with --agent=claude, --agent=codex, --agent=cursor or --agent=pi.');
+    const agent = { c: 'claude', claude: 'claude', x: 'codex', codex: 'codex', u: 'cursor', cursor: 'cursor', p: 'pi', pi: 'pi', a: 'antigravity', antigravity: 'antigravity' }[answer];
+    if (!agent) throw new Failure('Nothing was written. Name the agent with --agent=claude, --agent=codex, --agent=cursor, --agent=pi or --agent=antigravity.');
 
     return agent;
 }

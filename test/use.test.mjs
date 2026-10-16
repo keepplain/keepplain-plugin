@@ -146,6 +146,19 @@ test('a skill for Codex goes where Codex reads skills of a repository', async ()
     assert.equal(existsSync(join(repo, '.agents', 'skills', `kp-${SLUG}`, 'agents')), false, 'no openai.yaml: Codex may open it by itself');
 });
 
+test('Antigravity reads the same skill and AGENTS.md as Codex, Cursor and Pi', async () => {
+    const r = await cli([SLUG, '--agent=antigravity', '--write']);
+    assert.equal(r.ok, true, r.out);
+    assert.equal(read('.agents', 'skills', `kp-${SLUG}`, 'SKILL.md'), playbook('a1b2c3d4e5f6').skill);
+    assert.match(r.out, /Antigravity opens the skill/);
+    assert.equal(requests.at(-1), `/b/${SLUG}/use/skill.md?via=cli&agent=antigravity&write=1`);
+    assert.equal(uses()[0].agent, 'antigravity');
+
+    const rule = await cli([SLUG, '--as=rule', '--agent=antigravity', '--write']);
+    assert.match(rule.out, /Goes to: AGENTS\.md \(new\)/);
+    assert.equal(read('AGENTS.md'), playbook('a1b2c3d4e5f6').rule);
+});
+
 test('a rule is a block between its markers: added to the file, then replaced alone, line endings kept', async () => {
     const first = await cli([SLUG, '--as=rule', '--agent=codex', '--write']);
     assert.equal(first.ok, true, first.out);
@@ -170,14 +183,14 @@ test('a rule for Claude Code: CLAUDE.md, or AGENTS.md once CLAUDE.md imports it,
     writeFileSync(join(repo, 'AGENTS.md'), '# Shared\n');
     const own = await cli([SLUG, '--as=rule', '--agent=claude', '--write']);
     assert.match(own.out, /Goes to: CLAUDE\.md \(new\)/);
-    assert.match(own.out, /AGENTS\.md is here too, and it does not import the other file: Codex, Cursor and Pi will not see this block\./);
+    assert.match(own.out, /AGENTS\.md is here too, and it does not import the other file: Codex, Cursor, Pi and Antigravity will not see this block\./);
     assert.equal(read('CLAUDE.md'), playbook('a1b2c3d4e5f6').rule);
 
     rmSync(join(repo, 'CLAUDE.md'));
     writeFileSync(join(repo, 'CLAUDE.md'), 'Read the shared rules:\n\n@AGENTS.md\n');
     const shared = await cli([SLUG, '--as=rule', '--agent=claude', '--write']);
     assert.match(shared.out, /Goes to: AGENTS\.md \(added to the file\)/);
-    assert.match(shared.out, /CLAUDE\.md reads AGENTS\.md \(@AGENTS\.md\), so the block goes into AGENTS\.md: Claude Code, Codex, Cursor and Pi all read it\./);
+    assert.match(shared.out, /CLAUDE\.md reads AGENTS\.md \(@AGENTS\.md\), so the block goes into AGENTS\.md: Claude Code, Codex, Cursor, Pi and Antigravity all read it\./);
     assert.equal(read('AGENTS.md'), '# Shared\n\n' + playbook('a1b2c3d4e5f6').rule);
     assert.equal(read('CLAUDE.md'), 'Read the shared rules:\n\n@AGENTS.md\n');
 });
@@ -197,8 +210,8 @@ test('what it refuses: no playbook, no Build, no agent, another format', async (
     assert.match(missing.out, /http:\/\/127\.0\.0\.1:\d+\/b\/another-build has no playbook to use/);
 
     assert.match((await cli(['not a slug!', '--agent=claude'])).out, /Which Build\? Give its link or its slug/);
-    assert.match((await cli([SLUG])).out, /Say which agent it is for: --agent=claude, --agent=codex, --agent=cursor or --agent=pi\./, 'no terminal to ask in');
-    assert.match((await cli([SLUG, '--agent=windsurf'])).out, /--agent takes claude, codex, cursor or pi, not "windsurf"\./);
+    assert.match((await cli([SLUG])).out, /Say which agent it is for: --agent=claude, --agent=codex, --agent=cursor, --agent=pi or --agent=antigravity\./, 'no terminal to ask in');
+    assert.match((await cli([SLUG, '--agent=windsurf'])).out, /--agent takes claude, codex, cursor, pi or antigravity, not "windsurf"\./);
     assert.match((await cli([SLUG, '--agent=claude', '--as=zip'])).out, /--as takes skill, rule or prompt, not "zip"\./);
     assert.equal(existsSync(join(repo, '.claude')), false);
 });

@@ -1,14 +1,15 @@
 /**
  * Use this Build (plan: library, stage 22.3): a published Build's playbook from KeepPlain, put into the repository
- * you are in for Claude Code, Codex, Cursor or Pi. The text is the site's, the same for every agent
+ * you are in for Claude Code, Codex, Cursor, Pi or Antigravity. The text is the site's, the same for every agent
  * (/b/<slug>/use/<format>.md); where it goes differs:
  *
  *   skill   Claude Code  <repository>/.claude/skills/kp-<slug>/SKILL.md
  *           Codex        <repository>/.agents/skills/kp-<slug>/SKILL.md (Codex reads skills there, in the folder a
  *                        session starts in and the folders up to the repository's root; no agents/openai.yaml is
  *                        needed, and without one Codex may open the skill by itself, which is the point)
- *           Cursor, Pi   the same .agents/skills folder: both read it (Pi once the project is trusted), so one skill
- *                        serves Codex, Cursor and Pi
+ *           Cursor, Pi,  the same .agents/skills folder: all three read it (Pi once the project is trusted;
+ *           Antigravity  Antigravity reads the workspace's .agents/skills and AGENTS.md, by Google's migration guide),
+ *                        so one skill serves Codex, Cursor, Pi and Antigravity
  *   rule    Claude Code  CLAUDE.md, the others AGENTS.md, between the markers the site writes around it; a CLAUDE.md
  *                        that imports @AGENTS.md means every agent reads AGENTS.md, so the block goes there once
  *   prompt  nothing is written: it is pasted as the first message of a session
@@ -28,6 +29,7 @@ export const AGENTS = {
     codex: { id: 'codex', name: 'Codex', skills: ['.agents', 'skills'], rule: 'AGENTS.md' },
     cursor: { id: 'cursor', name: 'Cursor', skills: ['.agents', 'skills'], rule: 'AGENTS.md' },
     pi: { id: 'pi', name: 'Pi', skills: ['.agents', 'skills'], rule: 'AGENTS.md' },
+    antigravity: { id: 'antigravity', name: 'Antigravity', skills: ['.agents', 'skills'], rule: 'AGENTS.md' },
 };
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -41,11 +43,11 @@ export function buildSlug(value) {
     return slug.length <= 120 && SLUG.test(slug) ? slug : null;
 }
 
-/** claude, claude-code, codex, cursor or pi as one of AGENTS' ids; null for anything else. */
+/** claude, claude-code, codex, cursor, pi or antigravity as one of AGENTS' ids; null for anything else. */
 export function agentOf(value) {
     const v = String(value ?? '').trim().toLowerCase();
 
-    return ['codex', 'cursor', 'pi'].includes(v) ? v : v === 'claude' || v === 'claude-code' ? 'claude' : null;
+    return ['codex', 'cursor', 'pi', 'antigravity'].includes(v) ? v : v === 'claude' || v === 'claude-code' ? 'claude' : null;
 }
 
 /** The repository the folder is in, or the folder itself outside one: where agents look for skills and rules. */
@@ -72,10 +74,10 @@ export function ruleTarget(root, agent) {
     const claude = join(root, 'CLAUDE.md');
     const agents = join(root, 'AGENTS.md');
     if (existsSync(claude) && /^\s*@AGENTS\.md\s*$/m.test(readFileSync(claude, 'utf8'))) {
-        return { file: agents, name: 'AGENTS.md', note: 'CLAUDE.md reads AGENTS.md (@AGENTS.md), so the block goes into AGENTS.md: Claude Code, Codex, Cursor and Pi all read it.' };
+        return { file: agents, name: 'AGENTS.md', note: 'CLAUDE.md reads AGENTS.md (@AGENTS.md), so the block goes into AGENTS.md: Claude Code, Codex, Cursor, Pi and Antigravity all read it.' };
     }
     const own = agent === 'claude' ? { file: claude, name: 'CLAUDE.md' } : { file: agents, name: 'AGENTS.md' };
-    const other = agent === 'claude' ? { file: agents, name: 'AGENTS.md', agent: 'Codex, Cursor and Pi' } : { file: claude, name: 'CLAUDE.md', agent: 'Claude Code' };
+    const other = agent === 'claude' ? { file: agents, name: 'AGENTS.md', agent: 'Codex, Cursor, Pi and Antigravity' } : { file: claude, name: 'CLAUDE.md', agent: 'Claude Code' };
 
     return { ...own, note: existsSync(other.file) ? `${other.name} is here too, and it does not import the other file: ${other.agent} will not see this block.` : null };
 }
