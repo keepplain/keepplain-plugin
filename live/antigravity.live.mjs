@@ -13,12 +13,15 @@ import { agentSide, assertRulesReached, enable, fakeSite, fetchRules, findBin, k
 
 const agy = findBin('agy');
 /**
- * The model: LIVE_ANTIGRAVITY_MODEL, else the first Flash model `agy models` lists for the key. agy's own default
- * (a Pro model) has no quota on the Gemini API's free tier.
+ * The model: LIVE_ANTIGRAVITY_MODEL, else the models `agy models` lists for the key, Flash first, one of each (its
+ * -high, -medium and -low share a quota), tried in turn while the answer is a quota error: the Gemini API's free tier has
+ * none for agy's default (a Pro model) nor, it turned out, for the newest Flash.
  */
 const MODEL = process.env.LIVE_ANTIGRAVITY_MODEL;
 let model = MODEL ?? null;
 let models = [];
+/** The models tried, with why each got no answer. */
+const tried = [];
 const why = !agy ? 'agy is not in PATH' : !process.env.GEMINI_API_KEY ? 'no GEMINI_API_KEY for Antigravity' : false;
 let site;
 let box;
@@ -56,19 +59,40 @@ before(async () => {
     const listed = await runAgent(agy, ['models'], { cwd: box.repo, env, ms: 60_000 });
     keepOutput('antigravity-models', listed);
     models = flashFirst(listed.out);
-    model ??= models.find((m) => /flash/i.test(m)) ?? null;
     // The library, as an MCP server with the sign-in in a header: whether agy takes it is part of what is checked.
     mcp = await runAgent(agy, ['mcp', 'add', '--header', `Authorization: Bearer ${TOKEN}`, 'keepplain', `${site.url}/mcp`], { cwd: box.repo, env, ms: 30_000 });
 
-    run = await runAgent(agy, ['-p', task('search_coding_agent_sessions'), '--output-format', 'json', '--dangerously-skip-permissions', '--print-timeout', '4m', ...(model ? ['--model', model] : [])], { cwd: box.repo, env, ms: 300_000 });
-    keepOutput('antigravity', run);
-    try {
-        answer = JSON.parse(run.out.trim().split('\n').filter((l) => l.startsWith('{')).at(-1) ?? 'null');
-    } catch {
-        answer = null;
+    for (const candidate of MODEL ? [MODEL] : onePerModel(models).concat(models.length ? [] : [null])) {
+        model = candidate;
+        run = await runAgent(agy, ['-p', task('search_coding_agent_sessions'), '--output-format', 'json', '--dangerously-skip-permissions', '--print-timeout', '4m', ...(model ? ['--model', model] : [])], { cwd: box.repo, env, ms: 300_000 });
+        keepOutput('antigravity', run);
+        try {
+            answer = JSON.parse(run.out.trim().split('\n').filter((l) => l.startsWith('{')).at(-1) ?? 'null');
+        } catch {
+            answer = null;
+        }
+        id = answer?.conversation_id || null;
+        if (answer?.response || !isQuota(answer?.error)) break;
+        tried.push(`${model ?? "agy's default"}: ${quotaOf(answer.error)}`);
     }
-    id = answer?.conversation_id || null;
 });
+
+/** The first id of each model: gemini-3.8-flash-high stands for its -medium and -low too. */
+function onePerModel(ids) {
+    const seen = new Set();
+
+    return ids.filter((id) => {
+        const base = id.replace(/-(?:high|medium|low|minimal)$/i, '');
+        if (seen.has(base)) return false;
+        seen.add(base);
+
+        return true;
+    });
+}
+
+const isQuota = (error) => /RESOURCE_EXHAUSTED|exceeded your current quota/i.test(String(error ?? ''));
+/** A quota error in a few words: the model the API named, and whether it is the free tier's. */
+const quotaOf = (error) => `no quota for ${String(error).match(/model: ([\w.-]+)/)?.[1] ?? 'it'}${/free_tier/.test(String(error)) ? ' on the free tier' : ''}`;
 
 after(() => site?.close());
 
@@ -85,11 +109,8 @@ function flashFirst(text) {
 /** Why a run got no answer, in a line: a quota the key's plan does not have, and what to do about it. */
 function noAnswer() {
     const error = String(answer?.error ?? '');
-    if (/RESOURCE_EXHAUSTED|exceeded your current quota/i.test(error)) {
-        const on = error.match(/model: ([\w.-]+)/)?.[1] ?? model ?? "agy's default";
-        const free = /free_tier/.test(error) ? ' (the free tier has none for it)' : '';
-
-        return `the Gemini API key has no quota for ${on}${free}: set LIVE_ANTIGRAVITY_MODEL to a model it has quota for (agy models listed: ${models.join(', ') || 'none'}), or turn on billing for the key`;
+    if (isQuota(error)) {
+        return `the Gemini API key has quota for none of the models tried (${tried.join('; ')}): turn on billing for the key, or set LIVE_ANTIGRAVITY_MODEL to one it has quota for (agy models listed: ${models.join(', ') || 'none'})`;
     }
 
     return `no response (${answer?.status}: ${error})`;
