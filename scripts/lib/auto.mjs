@@ -224,12 +224,14 @@ const doneWith = (session) => Math.max(session.sent?.size ?? 0, session.held?.si
 
 /**
  * Whether the Stop hook sends this session now: it grew since the last send, and the last send (or the start) is
- * SYNC_EVERY_MS ago. A short session is never synced: its end sends it.
+ * SYNC_EVERY_MS ago. A short session is never synced: its end sends it. $first: the agent says no end (Antigravity), so
+ * the end of the first turn of a session never sent or tried sends it, and the rest go every SYNC_EVERY_MS.
  */
-export function syncDue(session, now = Date.now()) {
+export function syncDue(session, now = Date.now(), { first = false } = {}) {
     if (!session?.path || settled(session)) return false;
     const file = fileStat(session.path);
     if (!file || file.size <= doneWith(session)) return false;
+    if (first && !session.tried && !session.sent) return true;
 
     return now - Math.max(session.seen ?? 0, session.tried ?? 0) >= SYNC_EVERY_MS;
 }
@@ -241,14 +243,14 @@ export function syncDue(session, now = Date.now()) {
  * Two of those finding it due together start two uploads; the site takes the first and turns the other down
  * (import_running), which auto-send leaves unsaid.
  */
-export function syncIfDue(site, id, { path, agent = 'claude-code', args = [] } = {}, dir = home(), now = Date.now(), env = process.env) {
+export function syncIfDue(site, id, { path, agent = 'claude-code', args = [], first = false } = {}, dir = home(), now = Date.now(), env = process.env) {
     if (!id || !RUNNING_MODES.includes(sessionAutoMode(site, id, agent, dir, env))) return false;
     let session = autoSession(site, id, dir);
     // Auto mode turned on in the middle of a session starts with it from here.
     if (!session || (path && session.path !== path) || (session.agent ?? 'claude-code') !== agent) session = trackSession(site, id, { path, agent, past: false }, dir, now);
     // A past session the import sent goes on now: auto mode follows it from here.
     else if (session.past) session = trackSession(site, id, { past: false }, dir, now);
-    if (!syncDue(session, now)) return false;
+    if (!syncDue(session, now, { first })) return false;
     trackSession(site, id, { tried: now }, dir, now);
     inBackground(['auto-send', id, '--sync', ...args], env);
 

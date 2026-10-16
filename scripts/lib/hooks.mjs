@@ -295,7 +295,8 @@ function stop({ event, agent, site, id, agentArgs }) {
     if (id && mode === 'push') return;
     const messages = [];
     if (id && mode) {
-        syncIfDue(site, id, { path: event.transcript_path, agent, args: agentArgs });
+        // Antigravity has no end of a session: the end of its first turn sends it, as still going, the rest every five minutes.
+        syncIfDue(site, id, { path: event.transcript_path, agent, args: agentArgs, first: agent === 'antigravity' });
     } else if (id && nudgeOn()) {
         const path = sessionFile(event, agent, id);
         const builds = path ? nudgeDue({ agent, id, path }) : null;

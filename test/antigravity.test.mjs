@@ -27,9 +27,10 @@ import {
     readAntigravityNotes,
     transcriptCwd,
 } from '../scripts/lib/antigravity.mjs';
+import { setAutoMode } from '../scripts/lib/auto.mjs';
 import { agentOfSession, folderSessions, sessionCwd, sessionPath } from '../scripts/lib/sessions.mjs';
 import { showsMessages } from '../scripts/lib/unsaid.mjs';
-import { coders } from './helpers.mjs';
+import { coders, waitFor } from './helpers.mjs';
 
 const run = promisify(execFile);
 const fixture = (name) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
@@ -243,6 +244,26 @@ test('preview and send find the conversation the hooks noted for this folder, an
     // The folder the hook noted makes the changed paths relative.
     const changes = lines.flatMap((l) => (Array.isArray(l.message.content) ? l.message.content : [])).map((b) => b.change).filter(Boolean);
     assert.deepEqual([...new Set(changes.map((c) => c.path))], ['calc.js', 'calc.test.js']);
+});
+
+test('auto mode: the end of the first turn sends the conversation at once, since Antigravity never says it ended', async () => {
+    const kp = { KEEPPLAIN_HOME: join(home, 'kp-auto') };
+    setAutoMode(env.KEEPPLAIN_URL, 'all', 'antigravity', kp.KEEPPLAIN_HOME);
+    const before = imports.length;
+    const hook = (name, event) => cli(['hook', 'antigravity', name], kp, JSON.stringify(event));
+
+    assert.equal((await hook('session-start', events.SessionStart)).ok, true);
+    assert.equal((await hook('stop', events.Stop)).out.trim(), '{}');
+    await waitFor(() => imports.length > before, 20_000);
+    const sent = imports.at(-1);
+    assert.ok(sent && sent.fields.session_id === ID, 'the first turn\'s end sent nothing');
+    assert.equal(sent.fields.agent, 'antigravity');
+    assert.equal(sent.fields.trigger, 'auto');
+
+    // The next turn's end, right after: not due for five minutes.
+    await hook('stop', events.Stop);
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(imports.length, before + 1);
 });
 
 test('preview without a hook or a name says it cannot tell which conversation it is', async () => {
