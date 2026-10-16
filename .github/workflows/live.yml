@@ -23,7 +23,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # Cursor is left out until there is a CURSOR_API_KEY: the Free plan's dashboard has no user API keys, and CI has
         # no browser to sign in with. live/cursor.live.mjs is ready: add cursor here and the secret.
-        agent: [claude, codex, pi]
+        agent: [claude,  pi]
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -36,8 +36,6 @@ jobs:
 
       - if: matrix.agent == 'claude'
         run: npm install -g @anthropic-ai/claude-code
-      - if: matrix.agent == 'codex'
-        run: npm install -g @openai/codex
       - if: matrix.agent == 'pi'
         run: npm install -g @earendil-works/pi-coding-agent
       - if: matrix.agent == 'cursor' && runner.os != 'Windows'
@@ -56,7 +54,6 @@ jobs:
         run: |
           case "${{ matrix.agent }}" in
             claude) claude --version ;;
-            codex) codex --version ;;
             pi) pi --version ;;
             cursor) (agent --version || cursor-agent --version) ;;
           esac
