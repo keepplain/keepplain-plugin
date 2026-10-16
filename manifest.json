@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "keepplain.status",
+  "name": "KeepPlain",
+  "version": "0.1.0",
+  "author": "KeepPlain",
+  "license": "MIT",
+  "description": "Shows whether KeepPlain is saving your Claude Code, Codex, Cursor and Pi sessions, with your latest sessions and active rules one click away.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "BarWidget.qml" },
+  "barWidget": {
+    "displayName": "KeepPlain",
+    "category": "Development",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
