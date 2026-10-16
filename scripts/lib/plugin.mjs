@@ -39,7 +39,8 @@ export function pluginSources() {
 
 export function readSources(root) {
     const files = {};
-    const add = (path) => (files[relative(root, path).split('\\').join('/')] = readFileSync(path, 'utf8'));
+    // LF only: a Windows checkout may hold CRLF, and the plugin is laid out by matching lines.
+    const add = (path) => (files[relative(root, path).split('\\').join('/')] = readFileSync(path, 'utf8').replace(/\r\n/g, '\n'));
     const walk = (dir) => readdirSync(dir).forEach((name) => (statSync(join(dir, name)).isDirectory() ? walk(join(dir, name)) : add(join(dir, name))));
     SOURCE_FILES.forEach((f) => add(join(root, f)));
     SOURCE_DIRS.filter((d) => existsSync(join(root, d))).forEach((d) => walk(join(root, d)));
