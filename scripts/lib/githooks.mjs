@@ -4,10 +4,11 @@
  *
  *   prepare-commit-msg  adds `Agent-Session: <id>` for the sessions behind the commit (stage 11.4). A commit an agent
  *                       runs names its own session alone (committingSession). Any other, from a terminal, an IDE or
- *                       Cursor: a Claude Code session whose git snapshots (lib/snapshots.mjs) are newer than the last
- *                       commit and whose changes meet the index; a Codex session auto mode tracks in this repository,
- *                       written to since the last commit. Merges and squashes are left alone, a trailer already there
- *                       is not repeated.
+ *                       Cursor: a session whose git snapshots (lib/snapshots.mjs) are newer than the last commit and
+ *                       whose changes meet the index; where several sessions saw one change (parallel work in one
+ *                       folder), the ones whose transcript edited the file (lib/edits.mjs), else the first to see it;
+ *                       a Codex session auto mode tracks in this repository, written to since the last commit. Merges
+ *                       and squashes are left alone, a trailer already there is not repeated.
  *                       --no-trailers leaves this hook out.
  *   pre-push            finds the sessions behind the commits going out (their trailers, and Claude Code snapshots
  *                       whose HEAD was one of them). With auto mode on, team or push they are sent in the background,
@@ -25,6 +26,7 @@ import { join, resolve } from 'node:path';
 import { agentArgs } from './agent.mjs';
 import { inBackground, sessionAutoMode } from './auto.mjs';
 import { home } from './credentials.mjs';
+import { sessionEdits } from './edits.mjs';
 import { shCommand } from './plugin.mjs';
 import { agentOfSession, rolloutCwd, sentAt } from './sessions.mjs';
 import { pruneSnapshots, readSnapshots, snapshotDir } from './snapshots.mjs';
@@ -173,7 +175,7 @@ export function committingSession(env = process.env, dir = snapshotDir()) {
 }
 
 /** The sessions whose work this commit holds. */
-export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.env } = {}) {
+export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.env, now = Date.now() } = {}) {
     const staged = new Set(lines(git(root, ['diff', '--cached', '--name-only', '-z']), '\0'));
     if (!staged.size) return [];
     // An agent's commit is its session's alone. The snapshots cannot say whose a change is: a session working beside
@@ -187,23 +189,28 @@ export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.
         if (!committed.has(path)) committed.set(path, Number(git(root, ['log', '-1', '--format=%ct', '--', path])) * 1000 || 0);
         return committed.get(path);
     };
-    const ids = [];
+    // Each session with its answers whose changes to the staged files are not committed yet: {id, answers: [{from, to, paths}]}.
+    const candidates = [];
 
     for (const name of files(dir).filter((f) => f.endsWith('.json'))) {
         const state = readSnapshots(name.slice(0, -5), dir);
         if (!state?.root || !samePath(state.root, root) || !state.snapshots.length) continue;
-        const last = state.snapshots[state.snapshots.length - 1];
-        // The agent's answers whose changes to the staged files are not committed yet.
-        const behind = state.snapshots.some((b, i) => {
+        const answers = [];
+        state.snapshots.forEach((b, i) => {
             const a = state.snapshots[i - 1];
-            if (!a || b.kind !== 'stop' || a.tree === b.tree) return false;
-
-            return lines(git(root, ['diff', '--name-only', '-z', a.tree, b.tree]), '\0').some((p) => staged.has(p) && lastCommitted(p) < Date.parse(b.at));
+            if (!a || b.kind !== 'stop' || a.tree === b.tree) return;
+            const paths = lines(git(root, ['diff', '--name-only', '-z', a.tree, b.tree]), '\0').filter((p) => staged.has(p) && lastCommitted(p) < Date.parse(b.at));
+            if (paths.length) answers.push({ from: Date.parse(a.at), to: Date.parse(b.at), paths });
         });
         // An answer still going (the agent commits itself): what the index has that the last snapshot did not.
-        const now = last.kind !== 'stop' && Date.parse(last.at) > since && lines(git(root, ['diff', '--cached', '--name-only', '-z', last.tree]), '\0').some((p) => staged.has(p));
-        if (behind || now) ids.push(state.session_id);
+        const last = state.snapshots[state.snapshots.length - 1];
+        if (last.kind !== 'stop' && Date.parse(last.at) > since) {
+            const paths = lines(git(root, ['diff', '--cached', '--name-only', '-z', last.tree]), '\0').filter((p) => staged.has(p));
+            if (paths.length) answers.push({ from: Date.parse(last.at), to: now, paths });
+        }
+        if (answers.length) candidates.push({ id: state.session_id, answers });
     }
+    const ids = behindChanges(root, candidates, env);
 
     // Codex keeps no snapshots: a session auto mode follows in this repository, written to since the last commit.
     const tracked = readJson(join(home(env), 'auto-sessions.json'));
@@ -217,6 +224,42 @@ export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.
     }
 
     return ids;
+}
+
+/**
+ * Which of the candidate sessions made each staged change, in the candidates' order. A change one session alone saw
+ * is its. Sessions working beside each other in one folder see each other's edits in their snapshots (and the
+ * person's): a change several saw goes to those whose transcript edited the file in that answer (lib/edits.mjs), and
+ * when none did (a shell command, a hand edit) to the one whose answer holding it ended first. Transcripts are read
+ * only for such changes: a session on its own costs the commit nothing more.
+ */
+function behindChanges(root, candidates, env) {
+    const sawChange = new Map();
+    for (const candidate of candidates) {
+        for (const answer of candidate.answers) {
+            for (const path of answer.paths) sawChange.set(path, [...(sawChange.get(path) ?? []), { candidate, answer }]);
+        }
+    }
+    const edits = new Map();
+    const editsOf = (id) => {
+        if (!edits.has(id)) edits.set(id, sessionEdits(id, root, env));
+        return edits.get(id);
+    };
+    // Both paths come from the root with forward slashes (git's, and lib/edits.mjs makes the transcript's so).
+    const same = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+    const editedIn = (id, path, answer) => editsOf(id).some((e) => same(e.path, path) && e.to > answer.from && e.from <= answer.to);
+    const ids = new Set();
+    for (const [path, seen] of sawChange) {
+        if (new Set(seen.map((s) => s.candidate.id)).size === 1) {
+            ids.add(seen[0].candidate.id);
+            continue;
+        }
+        const own = seen.filter(({ candidate, answer }) => editedIn(candidate.id, path, answer));
+        if (own.length) own.forEach(({ candidate }) => ids.add(candidate.id));
+        else ids.add(seen.sort((x, y) => x.answer.to - y.answer.to)[0].candidate.id);
+    }
+
+    return candidates.filter((c) => ids.has(c.id)).map((c) => c.id);
 }
 
 /** pre-push <remote> <url>, the refs on stdin. */

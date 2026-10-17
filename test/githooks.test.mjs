@@ -2,7 +2,7 @@
 // sessions behind a push, and enable, status and disable putting the hooks in and taking them out again.
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,7 +16,15 @@ import { coders, makeRepo, waitFor } from './helpers.mjs';
 const run = promisify(execFile);
 const TOKEN = 'ct_' + 'g'.repeat(48);
 // One session per test: a session's snapshots belong to the repository it started in.
-const ids = { commit: 'a1b2c3d4-0000-4000-8000-0000000000d1', push: 'a1b2c3d4-0000-4000-8000-0000000000d2', beside: 'a1b2c3d4-0000-4000-8000-0000000000d3' };
+const ids = {
+    commit: 'a1b2c3d4-0000-4000-8000-0000000000d1',
+    push: 'a1b2c3d4-0000-4000-8000-0000000000d2',
+    beside: 'a1b2c3d4-0000-4000-8000-0000000000d3',
+    owner: 'a1b2c3d4-0000-4000-8000-0000000000d4',
+    watcher: 'a1b2c3d4-0000-4000-8000-0000000000d5',
+    early: 'a1b2c3d4-0000-4000-8000-0000000000d6',
+    late: 'a1b2c3d4-0000-4000-8000-0000000000d7',
+};
 const home = mkdtempSync(join(tmpdir(), 'ct-hooks-'));
 const program = [coders([])[0], ...coders([])[1]];
 // Snapshots slower than their budget turn themselves off; a slow CI runner must not do that here.
@@ -71,6 +79,65 @@ function repoWithSession(id) {
 
     return repo;
 }
+
+/** Writes session $id's transcript as Claude Code keeps it: one Edit of $path per call, at its time, with its result. */
+function transcript(id, calls) {
+    const lines = [];
+    calls.forEach(({ path, at, failed = false }, i) => {
+        const time = (ms) => new Date(ms).toISOString();
+        lines.push(JSON.stringify({ type: 'assistant', uuid: `a${i}`, cwd: 'C:\\code\\shop', timestamp: time(at), message: { role: 'assistant', content: [{ type: 'tool_use', id: `t${i}`, name: 'Edit', input: { file_path: path, old_string: 'line', new_string: 'changed' } }] } }));
+        const result = failed ? { is_error: true, content: 'File has not been read yet.' } : { content: 'The file has been updated.' };
+        lines.push(JSON.stringify({ type: 'user', uuid: `u${i}`, timestamp: time(at + 500), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `t${i}`, ...result }] } }));
+    });
+    writeFileSync(join(home, 'claude', 'projects', 'C--code-shop', `${id}.jsonl`), `${lines.join('\n')}\n`);
+}
+
+test('a change several sessions saw goes to the one whose transcript edited it, not to those that only saw it', () => {
+    const repo = makeRepo();
+    const dir = join(home, 'ct', 'snapshots');
+    const t = Date.now() - 60_000;
+    const snap = (id, kind, at) => takeSnapshot({ session_id: id, cwd: repo.dir }, kind, { dir, now: at, budgetMs: SLOW_OK });
+    // Two sessions answering at once in one folder: the owner writes app.txt, the watcher only sees it change.
+    snap(ids.owner, 'start', t);
+    snap(ids.owner, 'prompt', t + 1000);
+    snap(ids.watcher, 'start', t + 2000);
+    snap(ids.watcher, 'prompt', t + 3000);
+    writeFileSync(join(repo.dir, 'app.txt'), 'changed by the owner\n');
+    // The watcher's answer ends first: by the snapshots alone it would be the first to see the change.
+    snap(ids.watcher, 'stop', t + 10_000);
+    snap(ids.owner, 'stop', t + 11_000);
+    transcript(ids.owner, [{ path: join(repo.dir, 'app.txt'), at: t + 5000 }]);
+    // The watcher's own Edits of the file: one that failed, one from before this answer. Neither made this change.
+    transcript(ids.watcher, [{ path: join(repo.dir, 'app.txt'), at: t - 5000 }, { path: join(repo.dir, 'app.txt'), at: t + 4000, failed: true }]);
+    installHooks(hooksOf(repo.dir), program);
+    git(repo.dir, 'add', 'app.txt');
+
+    assert.deepEqual(sessionsBehindCommit(repo.dir, { dir, env }), [ids.owner]);
+    git(repo.dir, 'commit', '-q', '-m', 'Limiter by email');
+    assert.equal(message(repo.dir), `Limiter by email\n\nAgent-Session: ${ids.owner}`);
+});
+
+test('a change no transcript owns (a shell command, a hand edit) names the first session to see it, not every one', () => {
+    const repo = makeRepo();
+    const dir = join(home, 'ct', 'snapshots');
+    const t = Date.now() - 60_000;
+    const snap = (id, kind, at) => takeSnapshot({ session_id: id, cwd: repo.dir }, kind, { dir, now: at, budgetMs: SLOW_OK });
+    snap(ids.late, 'start', t);
+    snap(ids.late, 'prompt', t + 1000);
+    snap(ids.early, 'start', t + 2000);
+    snap(ids.early, 'prompt', t + 3000);
+    // Written by a command one of them ran, or by the person: no transcript has an Edit of it. One has no transcript at all.
+    writeFileSync(join(repo.dir, 'app.txt'), 'changed by a shell command\n');
+    rmSync(join(home, 'claude', 'projects', 'C--code-shop', `${ids.late}.jsonl`));
+    snap(ids.early, 'stop', t + 10_000);
+    snap(ids.late, 'stop', t + 11_000);
+    installHooks(hooksOf(repo.dir), program);
+    git(repo.dir, 'add', 'app.txt');
+
+    assert.deepEqual(sessionsBehindCommit(repo.dir, { dir, env }), [ids.early]);
+    git(repo.dir, 'commit', '-q', '-m', 'Limiter by email');
+    assert.equal(message(repo.dir), `Limiter by email\n\nAgent-Session: ${ids.early}`);
+});
 
 test('the block goes in after the shebang, keeps the hook that was there, and comes out cleanly', () => {
     const repo = makeRepo();
