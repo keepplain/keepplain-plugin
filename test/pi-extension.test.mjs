@@ -123,6 +123,10 @@ test('what the extension registers: nine commands, five events and the library\'
     assert.match(search.description, /find published sessions/);
     assert.ok(search.promptGuidelines.length >= 2, 'when to use it, and what never to put in the query');
     assert.match(search.promptSnippet, /^search_coding_agent_sessions:/);
+
+    // Why code changed: the commit, its trailer and its subject, which finds the commit's turn in a session that made several.
+    assert.deepEqual(Object.keys(pi.tools.get('search_my_work').parameters.properties), ['query', 'scope', 'cursor', 'paths', 'commit', 'agent_sessions', 'subject']);
+    assert.match(pi.tools.get('search_my_work').description, /subject \(its first line, git show -s --format=%s <sha>\)/);
 });
 
 test('words keeps quoted text together, and build\'s options are split between its two steps', () => {

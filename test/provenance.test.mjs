@@ -35,3 +35,9 @@ test('the line names the resume skill the way each agent calls it', () => {
     assert.match(provenanceContext('codex'), /\$keepplain:resume/);
     assert.match(provenanceContext('antigravity'), /\/keepplain-resume/);
 });
+
+test('the line asks for the commit with its trailer and its subject', () => {
+    // The subject tells apart the commits of a session that made several in another repository, quietly: without it
+    // the site finds the session but not the turn.
+    assert.match(provenanceContext('claude-code'), /the commit with its Agent-Session trailer values and its subject \(the first line of its message\)/);
+});
