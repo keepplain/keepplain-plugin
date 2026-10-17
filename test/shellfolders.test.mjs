@@ -1,7 +1,7 @@
 // The repositories the agent committed to from the shell (lib/shellfolders.mjs): what a command's cd, pushd and
 // git -C mean, each agent's transcript read for them, and with real git, the roots that go with the session.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
@@ -200,18 +200,20 @@ test('with git: the roots of the repositories worked in, other than the session\
         bash(`cd '${api.dir}' && git push`),
     ]);
     const same = (a, b) => assert.equal(process.platform === 'win32' ? a.toLowerCase() : a, process.platform === 'win32' ? b.toLowerCase() : b);
+    // git names a repository by its real path: Windows' long name for a short one (RUNNER~1), macOS's /private/var.
+    const real = (path) => normalizeDir(realpathSync.native(path));
 
     const found = shellFolders('claude-code', [file], own.dir);
     assert.equal(found.length, 2);
-    same(found[0].dir, normalizeDir(api.dir));
+    same(found[0].dir, real(api.dir));
     assert.equal(found[0].label, basename(api.dir));
-    same(found[1].dir, normalizeDir(other.dir));
+    same(found[1].dir, real(other.dir));
     assert.equal(found[1].label, basename(other.dir));
 
     // An added folder's repository is not repeated; a label taken is numbered, the session's own folder's name too.
     const added = shellFolders('claude-code', [file], own.dir, [{ dir: join(api.dir, 'src'), label: basename(other.dir) }]);
     assert.equal(added.length, 1);
-    same(added[0].dir, normalizeDir(other.dir));
+    same(added[0].dir, real(other.dir));
     assert.equal(added[0].label, `${basename(other.dir)} 2`);
     assert.deepEqual(shellFolders('claude-code', [file], own.dir, [], 1).map((f) => f.label), [basename(api.dir)], 'within the limit');
     assert.deepEqual(shellFolders('claude-code', [file], own.dir, Array.from({ length: 5 }, (_, i) => ({ dir: plain, label: `f${i}` }))), [], 'no room left');
@@ -221,6 +223,6 @@ test('with git: the roots of the repositories worked in, other than the session\
         // Git Bash names the drive as a folder: /c/Users/… is C:\Users\….
         const gitBash = normalizeDir(api.dir).replace(/^([A-Za-z]):/, (m, d) => `/${d.toLowerCase()}`);
         const viaBash = jsonl(dir, 'gitbash.jsonl', [bash(`cd ${gitBash} && git commit -m x`)]);
-        same(shellFolders('claude-code', [viaBash], own.dir)[0]?.dir, normalizeDir(api.dir));
+        same(shellFolders('claude-code', [viaBash], own.dir)[0]?.dir, real(api.dir));
     }
 });

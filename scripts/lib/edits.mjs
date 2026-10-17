@@ -207,17 +207,34 @@ function antigravityEdits(file, root) {
 
 /**
  * $file as a path from $root with forward slashes, or null for a file outside the repository (or the root itself). A
- * relative path is from $cwd, the session's folder, else from the root. Through symlinks too: git names the
- * repository by its real path (macOS's /var is /private/var), the agent may not.
+ * relative path is from $cwd, the session's folder, else from the root. Through symlinks and Windows' short names on
+ * both sides: git names the repository by its real path (macOS's /private/var, C:\Users\runneradmin), the agent's
+ * transcript by the path it worked in (/var, C:\Users\RUNNER~1).
  */
 export function relativeTo(root, file, cwd = null) {
     if (typeof file !== 'string' || file === '' || !root) return null;
     const full = slashes(isAbsolute(file) ? file : resolve(typeof cwd === 'string' && cwd !== '' ? cwd : root, file));
-    for (const base of new Set([slashes(root), slashes(realPath(root))])) {
-        if (full.length > base.length + 1 && full[base.length] === '/' && key(full.slice(0, base.length)) === key(base)) return full.slice(base.length + 1);
+    const bases = new Set([slashes(root), slashes(realPath(root))]);
+    for (const path of new Set([full, slashes(realFile(full))])) {
+        for (const base of bases) {
+            if (path.length > base.length + 1 && path[base.length] === '/' && key(path.slice(0, base.length)) === key(base)) return path.slice(base.length + 1);
+        }
     }
 
     return null;
+}
+
+/** The real path of a file that may be gone since (deleted, renamed): its nearest folder that is still there, resolved. */
+function realFile(path) {
+    const rest = [];
+    for (let at = path; ; at = dirname(at)) {
+        try {
+            return join(realpathSync.native(at), ...rest.reverse());
+        } catch {
+            if (dirname(at) === at) return path;
+            rest.push(basename(at));
+        }
+    }
 }
 
 const slashes = (path) => resolve(path).replace(/\\/g, '/').replace(/\/+$/, '');
