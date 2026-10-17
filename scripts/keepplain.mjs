@@ -128,6 +128,7 @@ import { agentTimes, gitChangeLines, pruneSnapshots, withGitLines } from './lib/
 import { addedFolders, slimLine } from './lib/slim.mjs';
 import { BINARY_VERSION, selfCommand, selfProgram, version } from './lib/runtime.mjs';
 import { agentOfSession, allSessions, describeSession, folderSessions, lastSent, markSent, sentAt, sentUrl, sessionCwd, sessionPath } from './lib/sessions.mjs';
+import { shellFolders } from './lib/shellfolders.mjs';
 import { removeLeftover, update, updateNotice } from './lib/update.mjs';
 import { changesSince, checkRules, saveRulesState } from './lib/team-rules.mjs';
 import { fetchRules, repositoryFacts, rulesEntry, rulesOn, setRulesOn, summary as rulesSummary } from './lib/rules.mjs';
@@ -410,7 +411,10 @@ async function prepare(id, cut = true, past = false) {
     const git = checkedGit(gitContext(sidecar?.cwd ?? stats.cwd, sidecar?.head ?? session.headStart, startedAt, ended), privacy);
     // The folders added to the session that are repositories of their own: their commits, under the folder's name.
     // The name goes through the same check as the session's lines, where it names the folder's files.
-    const gitFolders = folderGitContexts(session.folders, sidecar?.cwd ?? stats.cwd, startedAt, ended).map((g) => checkedGit({ ...g, folder: privacy.text(g.folder) }, privacy));
+    // With them, the repositories the agent went into from the shell and committed in (`cd ../api && git commit`,
+    // lib/shellfolders.mjs): the session names them nowhere else, and the site had no place for those commits.
+    const shellRepositories = shellFolders(AGENT.id, [...earlier.map((s) => s.path), ...pages.map((p) => p.path), path], sidecar?.cwd ?? stats.cwd, session.folders);
+    const gitFolders = folderGitContexts([...session.folders, ...shellRepositories], sidecar?.cwd ?? stats.cwd, startedAt, ended).map((g) => checkedGit({ ...g, folder: privacy.text(g.folder) }, privacy));
 
     // The project the session belongs to (grouping plan, 23.1): a hash and the folder's name, never the path.
     const found = projectOf(sidecar?.cwd ?? stats.cwd);

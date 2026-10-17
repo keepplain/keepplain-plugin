@@ -501,6 +501,36 @@ test('a folder added to the session is named, never shown by its path, and its r
     assert.doesNotMatch(slim, new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\\\/]src'), 'the folder goes by its name, not its path');
 });
 
+test('a repository the agent committed to from the shell goes with its commits, as a folder added to the session would', async () => {
+    const api = makeRepo('git@github.com:mara/shop-api.git');
+    const session = 'a1b2c3d4-0000-4000-8000-0000000000a2';
+    const at = (s) => `2026-09-01T10:0${s}:00.000Z`;
+    // The real shape: cd into the other repository, commit there with the message through a heredoc, all in one call.
+    const command = `cd '${api.dir}' && git log --oneline -3 && git add -A && git commit -q -F - <<'EOF'\nfix: raise the limit\n\nShared with the shop.\nEOF\ngit log -1`;
+    const lines = [
+        { type: 'user', cwd: repo.dir, message: { role: 'user', content: 'Raise the limit in the API too.' }, timestamp: at(0) },
+        { type: 'assistant', cwd: repo.dir, message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command, description: 'Commit in the API' } }] }, timestamp: at(1) },
+        { type: 'user', cwd: repo.dir, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: `[main ${api.hashes[2].slice(0, 7)}] fix: raise the limit` }] }, timestamp: at(2) },
+        { type: 'assistant', cwd: repo.dir, message: { role: 'assistant', content: [{ type: 'text', text: 'Committed in the API.' }] }, timestamp: at(3) },
+    ];
+    writeFileSync(join(home, 'projects', 'C--code-shop', `${session}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const folder = api.dir.replace(/\\/g, '/').split('/').pop();
+
+    const preview = await cli(['preview', session]);
+    assert.equal(preview.ok, true, preview.out);
+    assert.match(preview.out, new RegExp(`Git \\(${folder}\\): https://github.com/mara/shop-api .*2 commits in this session`));
+    assert.doesNotMatch(preview.out, /Folders:/, 'nothing was added to the session');
+
+    assert.equal((await cli(['send', session])).ok, true);
+    const sent = JSON.parse(received.toString('utf8').match(/name="git_folders"\r\n\r\n(.*)\r\n/)[1]);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].folder, folder);
+    assert.equal(sent[0].remote, 'https://github.com/mara/shop-api');
+    // The commit's hash is here: the site can place it by it.
+    assert.deepEqual(sent[0].commits.shas, [api.hashes[2], api.hashes[1]]);
+    assert.doesNotMatch(received.toString('utf8'), new RegExp(api.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\\/g, '[\\\\/]')), 'the folder goes by its name, not its path');
+});
+
 test('a session in a team repository goes to the team, unless the person keeps it private', async () => {
     const work = 'a1b2c3d4-0000-4000-8000-000000000002';
     const acme = makeRepo('git@github.com:Acme-Inc/billing.git');
