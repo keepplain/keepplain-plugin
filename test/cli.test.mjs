@@ -10,6 +10,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
+import { projectOf } from '../scripts/lib/git.mjs';
 import { BINARY, coders, hookCommand, makeRepo, waitFor } from './helpers.mjs';
 
 const run = promisify(execFile);
@@ -499,6 +500,30 @@ test('a folder added to the session is named, never shown by its path, and its r
     assert.deepEqual(sent.map((g) => [g.folder, g.remote, g.commits.count, g.head_start_estimated]), [[folder, 'https://github.com/mara/shop-api', 2, true]]);
     assert.match(slim, new RegExp(`"root":"${folder}"`));
     assert.doesNotMatch(slim, new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\\\/]src'), 'the folder goes by its name, not its path');
+});
+
+test('a file edited in another repository goes from its root under its name and project key, without that repository\'s commits', async () => {
+    const api = makeRepo('git@github.com:mara/shop-api.git');
+    const session = 'a1b2c3d4-0000-4000-8000-0000000000a3';
+    const at = (s) => `2026-09-01T10:0${s}:00.000Z`;
+    // Not added to the session, not committed to: only edited from the shop's folder.
+    const lines = [
+        { type: 'user', cwd: repo.dir, message: { role: 'user', content: 'Raise the limit in the API.' }, timestamp: at(0) },
+        { type: 'user', cwd: repo.dir, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] }, timestamp: at(2),
+          toolUseResult: { filePath: join(api.dir, 'src', 'limits.ts'), structuredPatch: [{ oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, lines: ['-limit = 5', '+limit = 10'] }] } },
+        { type: 'assistant', cwd: repo.dir, message: { role: 'assistant', content: [{ type: 'text', text: 'Raised.' }] }, timestamp: at(3) },
+    ];
+    writeFileSync(join(home, 'projects', 'C--code-shop', `${session}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    const folder = api.dir.replace(/\\/g, '/').split('/').pop();
+
+    const preview = await cli(['preview', session]);
+    assert.equal(preview.ok, true, preview.out);
+    assert.match(preview.out, new RegExp(`Repos: +${folder} edited by the agent`));
+    assert.doesNotMatch(preview.out, /Git \(/, 'the repository\'s commits are not the session\'s');
+    const slim = gunzipSync(readFileSync(join(temp, 'keepplain', `${session}.jsonl.gz`))).toString('utf8');
+    const change = slim.split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l)).flatMap((l) => l.message?.content ?? []).find((b) => b?.change)?.change;
+    assert.deepEqual([change.path, change.root, change.project], ['src/limits.ts', folder, projectOf(api.dir).key]);
+    assert.doesNotMatch(slim, new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\\\/]src'), 'the repository goes by its name, not its path');
 });
 
 test('a repository the agent committed to from the shell goes with its own commits, not the others made there meanwhile', async () => {

@@ -24,6 +24,8 @@ const ids = {
     watcher: 'a1b2c3d4-0000-4000-8000-0000000000d5',
     early: 'a1b2c3d4-0000-4000-8000-0000000000d6',
     late: 'a1b2c3d4-0000-4000-8000-0000000000d7',
+    away: 'a1b2c3d4-0000-4000-8000-0000000000d8',
+    stale: 'a1b2c3d4-0000-4000-8000-0000000000d9',
 };
 const home = mkdtempSync(join(tmpdir(), 'ct-hooks-'));
 const program = [coders([])[0], ...coders([])[1]];
@@ -137,6 +139,32 @@ test('a change no transcript owns (a shell command, a hand edit) names the first
     assert.deepEqual(sessionsBehindCommit(repo.dir, { dir, env }), [ids.early]);
     git(repo.dir, 'commit', '-q', '-m', 'Limiter by email');
     assert.equal(message(repo.dir), `Limiter by email\n\nAgent-Session: ${ids.early}`);
+});
+
+test("a file a session of another folder edited is that session's, once edited after the file was last committed", () => {
+    const [home2, site2] = [makeRepo(), makeRepo()];
+    const dir = join(home, 'ct', 'snapshots');
+    const t = Date.now() - 60_000;
+    // Both sessions work in the plugin's folder (home2): their snapshots are of it and saw nothing of the site (site2).
+    for (const id of [ids.away, ids.stale]) {
+        takeSnapshot({ session_id: id, cwd: home2.dir }, 'start', { dir, now: t, budgetMs: SLOW_OK });
+        takeSnapshot({ session_id: id, cwd: home2.dir }, 'prompt', { dir, now: t + 1000, budgetMs: SLOW_OK });
+        takeSnapshot({ session_id: id, cwd: home2.dir }, 'stop', { dir, now: t + 20_000, budgetMs: SLOW_OK });
+    }
+    // One edited the site's page in its answer; the other did too, but before the page was last committed.
+    transcript(ids.away, [{ path: join(site2.dir, 'app.txt'), at: t + 5000 }]);
+    transcript(ids.stale, [{ path: join(site2.dir, 'app.txt'), at: Date.parse('2026-09-01T10:00:00Z') }]);
+    writeFileSync(join(site2.dir, 'app.txt'), 'debounced by the agent\n');
+    installHooks(hooksOf(site2.dir), program);
+    git(site2.dir, 'add', 'app.txt');
+
+    assert.deepEqual(sessionsBehindCommit(site2.dir, { dir, env }), [ids.away]);
+    git(site2.dir, 'commit', '-q', '-m', 'feat: search debounce');
+    assert.equal(message(site2.dir), `feat: search debounce\n\nAgent-Session: ${ids.away}`);
+    // A commit of a file neither edited names neither.
+    writeFileSync(join(site2.dir, 'other.txt'), 'by hand\n');
+    git(site2.dir, 'add', 'other.txt');
+    assert.deepEqual(sessionsBehindCommit(site2.dir, { dir, env }), []);
 });
 
 test('the block goes in after the shebang, keeps the hook that was there, and comes out cleanly', () => {

@@ -101,7 +101,7 @@ import { AUTO_MODES, autoMode, autoSession, catchUp, currentSize, inBackground, 
 import { siteUrl } from './lib/config.mjs';
 import { clearPendingLogin, forgetToken, home as credentialsHome, pendingLogin, savedToken, savedUsername, savePendingLogin, saveToken, writePrivate } from './lib/credentials.mjs';
 import { Failure } from './lib/failure.mjs';
-import { folderGitContexts, gitContext, normalizeRemote, projectOf, repositoryRoot, worktrees } from './lib/git.mjs';
+import { fileRepository, folderGitContexts, gitContext, normalizeRemote, projectOf, repositoryRoot, worktrees } from './lib/git.mjs';
 import { agentStatus, disable, enable, refresh, status } from './lib/enable.mjs';
 import { runGitHook } from './lib/githooks.mjs';
 import { AGENT_IDS, AGENTS, agentArgs, agentId, commandIn, hasPluginOptions } from './lib/agent.mjs';
@@ -455,6 +455,7 @@ async function preview(id) {
             site,
             project: project?.name ?? stats.project ?? null,
             folders: session.folders.map((f) => f.label),
+            repositories: session.repositories.map((r) => r.label),
             prompts: stats.prompts,
             tool_calls: stats.toolCalls,
             duration: formatDuration(stats.durationSec),
@@ -482,6 +483,9 @@ async function preview(id) {
     console.log(`  Project:    ${project?.name ?? stats.project ?? 'unknown'}${project ? ': its name and a hash that tells it apart go, never its path' : ''}`);
     if (session.folders.length) {
         console.log(`  Folders:    ${session.folders.map((f) => f.label).join(', ')} added to the session: files there go under the folder's name, never its path. Rename or hide the names in the draft.`);
+    }
+    if (session.repositories.length) {
+        console.log(`  Repos:      ${session.repositories.map((r) => r.label).join(', ')} edited by the agent: files there go from the repository's root under its name and its project's hash, never its path.`);
     }
     console.log(`  Prompts:    ${stats.prompts}, tool calls: ${stats.toolCalls}`);
     console.log(`  Time span:  ${formatDuration(stats.durationSec)}`);
@@ -520,7 +524,9 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
     const title = new TitleWatch();
     const prompts = [];
     // Shared by every line: slimming learns the session folder from it, to make changed paths relative (plan, stage 11.1).
-    const ctx = {};
+    // A file the agent edited in another git repository goes from that repository's root, with its project's key: the
+    // site finds the session by the file in that project too (lib/git.mjs fileRepository).
+    const ctx = { repositoryOf: fileRepository };
     if (cursorNotes?.cwd) slimLine({ type: 'session', cwd: cursorNotes.cwd }, ctx);
     const code = { files: new Set(), additions: 0, deletions: 0, withheld: new Set() };
     let cwd = null;
@@ -615,6 +621,8 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
         title: title.result(),
         prompts,
         folders: addedFolders(ctx),
+        // Other git repositories the agent edited files in (slim.mjs repository): only their names leave the machine.
+        repositories: ctx.repositories ?? [],
         library: library.result(),
     };
 }

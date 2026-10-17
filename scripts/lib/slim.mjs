@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/slimSession.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:57fdba995cf047bbc1f029a42f2f156875040bc45eeabfb57c3b5a3374248da5
+// sha256:e6cfbbf2b0f213660b325e7e188a065d4401118ab449ad4a937a4bb1cf877416
 
 /**
  * Claude Code and Codex sessions are mostly weight nobody reads: screenshots as base64, whole files
@@ -258,8 +258,36 @@ export function addedFolders(ctx) {
     });
 }
 /**
- * The path inside the session's folder, or inside the added folder that holds it (the deepest one); a file elsewhere
- * keeps only its last two parts, since the rest names the person.
+ * The repository a file outside the session's folders is in, as ctx.repositoryOf finds it, with the name its files go
+ * by: its own, numbered when the session's folder, an added one or an earlier repository has it. Not a drive, a home
+ * folder or the agents' own (~/.claude): their names say nothing, or name the person.
+ */
+function repository(path, ctx) {
+    const found = ctx.repositoryOf?.(path);
+    if (!found || typeof found.dir !== 'string' || !/^[0-9a-f]{64}$/.test(found.project ?? ''))
+        return null;
+    const dir = norm(found.dir);
+    if (bare(dir) || /(^|\/)\.(claude|codex)(\/|$)/i.test(dir) || !within(path, dir))
+        return null;
+    const repositories = (ctx.repositories ??= []);
+    const known = repositories.find((r) => r.dir.toLowerCase() === dir.toLowerCase());
+    if (known)
+        return known;
+    const main = ctx.cwd ? norm(ctx.cwd) : '';
+    const used = [main && !bare(main) ? lastParts(main, 1) : '', ...addedFolders(ctx).map((f) => f.label), ...repositories.map((r) => r.label)].map((l) => l.toLowerCase());
+    const name = lastParts(dir, 1);
+    let label = name;
+    for (let n = 2; used.includes(label.toLowerCase()); n++)
+        label = `${name} ${n}`;
+    const repo = { dir, label, project: found.project };
+    repositories.push(repo);
+    return repo;
+}
+/**
+ * The path inside the session's folder, or inside the added folder that holds it (the deepest one); a file in another
+ * git repository, from that repository's root, under its name and with its project's key (repository); a file
+ * elsewhere keeps only its last two parts, since the rest names the person. A file of an added folder that is a
+ * repository's root carries its project's key too: the server files the change under that project.
  */
 function changedPath(file, ctx) {
     const path = norm(file);
@@ -269,10 +297,16 @@ function changedPath(file, ctx) {
     const folder = addedFolders(ctx)
         .filter((f) => within(path, f.dir))
         .sort((a, b) => b.dir.length - a.dir.length)[0];
-    if (folder)
-        return { path: path.slice(folder.dir.length + 1), root: folder.label };
+    if (folder) {
+        const found = ctx.repositoryOf?.(path);
+        const project = found && norm(found.dir).toLowerCase() === folder.dir.toLowerCase() && /^[0-9a-f]{64}$/.test(found.project ?? '') ? found.project : null;
+        return { path: path.slice(folder.dir.length + 1), root: folder.label, ...(project ? { project } : {}) };
+    }
     if (!/^([a-z]:)?\//i.test(path))
         return { path: path.replace(/^\.\//, '') };
+    const repo = repository(path, ctx);
+    if (repo)
+        return { path: path.slice(repo.dir.length + 1), root: repo.label, project: repo.project };
     return { path: `…/${lastParts(path, 2)}`, outside: true };
 }
 function fileChange(file, op, lines, ctx, from) {
@@ -281,6 +315,7 @@ function fileChange(file, op, lines, ctx, from) {
     const change = {
         path: where.path,
         ...(where.root ? { root: where.root } : {}),
+        ...(where.project ? { project: where.project } : {}),
         ...(from ? { from: changedPath(from, ctx).path } : {}),
         op,
         additions: lines.filter((l) => body(l) && l.startsWith('+')).length,

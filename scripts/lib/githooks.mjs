@@ -7,6 +7,8 @@
  *                       Cursor: a session whose git snapshots (lib/snapshots.mjs) are newer than the last commit and
  *                       whose changes meet the index; where several sessions saw one change (parallel work in one
  *                       folder), the ones whose transcript edited the file (lib/edits.mjs), else the first to see it;
+ *                       a session of another folder whose transcript edited a staged file since it was last committed
+ *                       (its snapshots are of its own folder: elsewhereEdits);
  *                       a Codex session auto mode tracks in this repository, written to since the last commit. Merges
  *                       and squashes are left alone, a trailer already there is not repeated.
  *                       --no-trailers leaves this hook out.
@@ -210,6 +212,7 @@ export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.
         }
         if (answers.length) candidates.push({ id: state.session_id, answers });
     }
+    candidates.push(...elsewhereEdits(root, staged, lastCommitted, dir, env, now));
     const ids = behindChanges(root, candidates, env);
 
     // Codex keeps no snapshots: a session auto mode follows in this repository, written to since the last commit.
@@ -224,6 +227,41 @@ export function sessionsBehindCommit(root, { dir = snapshotDir(), env = process.
     }
 
     return ids;
+}
+
+/** Sessions of other folders whose transcripts a commit by hand reads, the newest first: each read costs the commit time. */
+const MAX_ELSEWHERE = 10;
+/** How far back such a session may have stopped: snapshots are kept that long (pruneSnapshots). */
+const ELSEWHERE_DAYS = 14;
+
+/**
+ * Sessions of another folder whose agent edited staged files of this repository (`cd`-less: an Edit of
+ * E:/dev/site/app.vue from the plugin's folder): their snapshots are of their own folder and saw nothing here, their
+ * transcript says it (lib/edits.mjs). A candidate per session, an answer per edit made after the file was last
+ * committed. Only sessions that took snapshots lately, the newest MAX_ELSEWHERE, are read.
+ */
+function elsewhereEdits(root, staged, lastCommitted, dir, env, now) {
+    const recent = [];
+    for (const name of files(dir).filter((f) => f.endsWith('.json'))) {
+        const state = readSnapshots(name.slice(0, -5), dir);
+        const last = state?.snapshots?.[state.snapshots.length - 1];
+        if (!state?.root || samePath(state.root, root) || !last) continue;
+        const at = Date.parse(last.at);
+        if (at > now - ELSEWHERE_DAYS * 86_400_000) recent.push({ id: state.session_id, at });
+    }
+    // Both paths come from the root with forward slashes; git's on Windows in their case, the transcript's in its own.
+    const stagedPath = new Map([...staged].map((p) => [process.platform === 'win32' ? p.toLowerCase() : p, p]));
+    const candidates = [];
+    for (const { id } of recent.sort((a, b) => b.at - a.at).slice(0, MAX_ELSEWHERE)) {
+        const answers = [];
+        for (const e of sessionEdits(id, root, env)) {
+            const path = stagedPath.get(process.platform === 'win32' ? e.path.toLowerCase() : e.path);
+            if (path && e.to > lastCommitted(path)) answers.push({ from: e.from - 1, to: e.to, paths: [path] });
+        }
+        if (answers.length) candidates.push({ id, answers });
+    }
+
+    return candidates;
 }
 
 /**

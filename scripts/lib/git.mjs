@@ -120,6 +120,39 @@ export function projectOf(cwd) {
     return { key: sha256(`path:${pathKey(root)}`), name: folderName(root), root: resolve(root), remote: null };
 }
 
+/** Repositories found by fileRepository, by the folder asked about. */
+const repositories = new Map();
+
+/**
+ * The git repository a file is in, for a file the agent edited outside the session's folders (slim.mjs, repositoryOf):
+ * {dir, project}, dir the repository's top folder spelt as $path spells it (a parent of it, so the path from the root
+ * is its rest), project the key projectOf gives it (a worktree's is its repository's). Null when no folder above the
+ * file holds a .git. The file itself need not exist any more: its nearest folder that does is asked.
+ */
+export function fileRepository(path) {
+    if (typeof path !== 'string' || path === '') return null;
+    const parts = path.replace(/\\/g, '/').split('/');
+    const tried = [];
+    let found = null;
+    for (let n = parts.length - 1; n > 0; n--) {
+        const dir = parts.slice(0, n).join('/');
+        if (dir === '' || /^[a-z]:$/i.test(dir)) break;
+        if (repositories.has(dir)) {
+            found = repositories.get(dir);
+            break;
+        }
+        tried.push(dir);
+        if (existsSync(`${dir}/.git`)) {
+            const project = projectOf(dir);
+            found = project ? { dir, project: project.key } : null;
+            break;
+        }
+    }
+    for (const dir of tried) repositories.set(dir, found);
+
+    return found;
+}
+
 /** The working trees of the repository at $root (the main one first), for the sessions list: [path]. */
 export function worktrees(root) {
     const list = root ? git(root, ['worktree', 'list', '--porcelain']) : null;
