@@ -41,6 +41,13 @@ test('each turn: what the person changed by hand, what the agent changed, the co
 
     assert.ok(git(dir, 'rev-parse', `refs/keepplain/${ID}`));
     assert.notEqual(git(dir, 'rev-parse', 'HEAD'), readSnapshots(ID, store).commit);
+    // The snapshots sit in the ref's reflog, the ref on HEAD: `git log --all` shows the person's history only, and a
+    // search for where code came from finds no snapshot that holds the whole tree.
+    assert.equal(git(dir, 'rev-parse', `refs/keepplain/${ID}`), git(dir, 'rev-parse', 'HEAD'));
+    assert.ok(!git(dir, 'log', '--all', '--format=%s').includes('keepplain snapshot'));
+    assert.equal(git(dir, 'log', '--all', '--format=%s', '-S', 'agent line'), '');
+    // And git gc keeps them.
+    git(dir, 'gc', '-q', '--prune=now');
 
     const lines = gitChangeLines(ID, [at(20)], store);
     assert.equal(lines.length, 2);
@@ -125,6 +132,26 @@ test('a slow repository turns snapshots off, a moment\'s slowness does not, and 
     const plain = mkdtempSync(join(tmpdir(), 'ct-plain-'));
     assert.equal(takeSnapshot({ session_id: 'b1b2c3d4-0000-4000-8000-000000000002', cwd: plain }, 'start', { dir: store }), null);
     assert.equal(takeSnapshot({ session_id: '../../etc', cwd: dir }, 'start', { dir: store }), null);
+});
+
+test('a ref an earlier version left on its snapshot goes into the reflog, and git gc still keeps the snapshot', () => {
+    const { dir, store, snap } = setup();
+    snap('start', 0);
+    writeFileSync(join(dir, 'app.txt'), 'changed\n');
+    snap('stop', 10);
+    const { commit } = readSnapshots(ID, store);
+    git(dir, 'update-ref', `refs/keepplain/${ID}`, commit);
+    // And one from before the plugin's rename, which nothing reads.
+    git(dir, 'update-ref', 'refs/coders-talk/d1b2c3d4-0000-4000-8000-000000000004', commit);
+    assert.ok(git(dir, 'log', '--all', '--format=%s').includes('keepplain snapshot'));
+
+    pruneSnapshots(dir, { dir: store });
+    assert.equal(git(dir, 'rev-parse', `refs/keepplain/${ID}`), git(dir, 'rev-parse', 'HEAD'));
+    assert.equal(git(dir, 'for-each-ref', 'refs/coders-talk/'), '');
+    assert.ok(!git(dir, 'log', '--all', '--format=%s').includes('keepplain snapshot'));
+    git(dir, 'gc', '-q', '--prune=now');
+    assert.equal(git(dir, 'cat-file', '-t', commit), 'commit');
+    assert.equal(gitChangeLines(ID, [], store).length, 1);
 });
 
 test('old snapshots go, and with them their refs', () => {

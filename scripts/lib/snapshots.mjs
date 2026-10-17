@@ -3,8 +3,10 @@
  * subagents included, and what the person changed by hand between its answers.
  *
  * A snapshot is a tree written from a temporary index, never the person's own: their branch, index and files stay as
- * they are. Trees are chained as commits under one ref per session, refs/keepplain/<session>, so `git gc` keeps them;
- * a plain `git push` does not send such refs. Nothing leaves the machine here: /keepplain:build turns the snapshots
+ * they are. Trees are chained as commits in the reflog of one ref per session, refs/keepplain/<session>, so `git gc`
+ * keeps them; the ref itself points at HEAD, so `git log --all` (and an agent's `git log --all -S` looking for where
+ * code came from) does not list them: each session's first snapshot holds the whole tree and matched every search.
+ * A plain `git push` does not send such refs. Nothing leaves the machine here: /keepplain:build turns the snapshots
  * into "git-changes" lines of the session it sends, after the preview.
  *
  * ~/.keepplain/snapshots/<session>.json holds the list {kind: start|prompt|stop, at, tree, head}; <session>.index is
@@ -31,6 +33,7 @@ const MAX_NEW_FILES = 2000;
 const MAX_COMMITS = 50;
 const KEEP_DAYS = 14;
 const REF = 'refs/keepplain/';
+const LEGACY_REF = 'refs/coders-talk/';
 
 // commit-tree needs a name even where the person set none; the snapshot commits are never theirs.
 const IDENTITY = { GIT_AUTHOR_NAME: 'keepplain', GIT_AUTHOR_EMAIL: 'snapshots@keepplain.com', GIT_COMMITTER_NAME: 'keepplain', GIT_COMMITTER_EMAIL: 'snapshots@keepplain.com' };
@@ -112,13 +115,14 @@ export function takeSnapshot(event, kind, { dir = snapshotDir(), now = Date.now(
     }
     if (!tree) return null;
 
+    const head = git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { timeout: budgetMs });
     const last = state.snapshots[state.snapshots.length - 1];
     if (!last || last.tree !== tree) {
         const commit = git(root, ['commit-tree', tree, '-m', `keepplain snapshot ${id}`, ...(state.commit ? ['-p', state.commit] : [])], { env, timeout: budgetMs });
-        if (commit && git(root, ['update-ref', `${REF}${id}`, commit], { env, timeout: budgetMs }) !== null) state.commit = commit;
+        if (commit && keepInReflog(root, `${REF}${id}`, commit, head, { env, timeout: budgetMs })) state.commit = commit;
     }
 
-    const entry = { kind, at: new Date(now).toISOString(), tree, head: git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { timeout: budgetMs }) };
+    const entry = { kind, at: new Date(now).toISOString(), tree, head };
     state.root = root;
     state.snapshots.push(entry);
     if (Date.now() - began > budgetMs) state.slow = (state.slow ?? 0) + 1;
@@ -127,6 +131,18 @@ export function takeSnapshot(event, kind, { dir = snapshotDir(), now = Date.now(
     writeSnapshots(state, dir);
 
     return entry;
+}
+
+/**
+ * The ref goes to the snapshot and on to HEAD: the snapshot stays in the ref's reflog, whose entries `git gc` keeps
+ * for 30 days at least (gc.reflogExpireUnreachable; snapshots go after 14), while `git log --all` walks only from HEAD, already in the person's history.
+ * Without a HEAD yet (a repository with no commit) the ref stays on the snapshot.
+ */
+function keepInReflog(root, ref, commit, head, options) {
+    if (git(root, ['update-ref', '--create-reflog', '-m', 'keepplain snapshot', ref, commit], options) === null) return false;
+    if (head) git(root, ['update-ref', '--create-reflog', '-m', 'keepplain snapshot', ref, head], options);
+
+    return true;
 }
 
 function sizeOf(path) {
@@ -296,10 +312,17 @@ export function pruneSnapshots(cwd, { dir = snapshotDir(), now = Date.now() } = 
             if (now - mtimeOf(path) > KEEP_DAYS * 86_400_000) rmSync(path, { force: true });
         }
     }
-    const refs = cwd ? git(cwd, ['for-each-ref', '--format=%(refname)', REF]) : null;
-    for (const ref of (refs ?? '').split('\n').filter(Boolean)) {
+    const refs = cwd ? git(cwd, ['for-each-ref', '--format=%(refname)%09%(objectname)%09%(subject)', REF]) : null;
+    let head;
+    for (const line of (refs ?? '').split('\n').filter(Boolean)) {
+        const [ref, tip, subject] = line.split('\t');
         if (!existsSync(join(dir, `${ref.slice(REF.length)}.json`))) git(cwd, ['update-ref', '-d', ref]);
+        // A ref left on its snapshot, by an earlier version or before the repository's first commit: into the reflog.
+        else if (subject?.startsWith('keepplain snapshot ') && (head ??= git(cwd, ['rev-parse', '--verify', '-q', 'HEAD']))) keepInReflog(cwd, ref, tip, head);
     }
+    // The plugin's refs from before its rename: nothing reads them, and their snapshots filled `git log --all`.
+    const legacy = cwd ? git(cwd, ['for-each-ref', '--format=%(refname)', LEGACY_REF]) : null;
+    for (const ref of (legacy ?? '').split('\n').filter(Boolean)) git(cwd, ['update-ref', '-d', ref]);
 }
 
 function mtimeOf(path) {
