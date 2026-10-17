@@ -25,6 +25,12 @@
  * pull or push. A repository the agent only read (`cd ../other && grep …`, `git -C ../other log`) does not: whatever
  * was committed there meanwhile is other work's. Only the transcript is read: a commit from a terminal the agent did
  * not run is not here.
+ *
+ * Of such a repository only the agent's own commits go (folderGitContexts, lib/git.mjs): the folder is the person's or a
+ * team's, and the others committed there meanwhile are theirs. Its own are those its git commit named, by the title the
+ * command gives (-m, or the first line of a heredoc: the site's WorkMemory::subjectOf), and those git printed in reply
+ * ("[main 5e5e5e5] Title"). A commit neither names is not sent at all, not even its hash: the site places a commit by
+ * its title or its printed hash, so a bare hash would be of no use there and only tell of someone else's work.
  */
 import { execFileSync } from 'node:child_process';
 import { closeSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
@@ -47,6 +53,8 @@ const CLAUDE_TOOL = /"name":"(?:Bash|PowerShell)"/;
 const CURSOR_TOOL = /"name":"(?:Shell|run_terminal_cmd)"/;
 const CODEX_TOOLS = new Set(['shell', 'shell_command', 'exec_command', 'local_shell', 'container.exec']);
 const RESET = 'Shell cwd was reset to ';
+/** What git prints for a commit it made: "[main 5e5e5e5] Title", "[detached HEAD 5e5e5e5]" (the site's GIT_COMMITTED). */
+const GIT_COMMITTED = /^\[[^\]\n]* ([0-9a-f]{7,40})\]/gm;
 /** A drive, the file system's root or a home folder: its name says nothing, or names the person (as slim.mjs has it). */
 const bare = (dir) => /^([a-z]:)?(\/(users|home)\/[^/]+)?$/i.test(dir) || dir === '/root';
 
@@ -68,7 +76,9 @@ export function sessionShellFolders(id, env = process.env, folders = []) {
  * roots, each once, as [{dir, label}] in the order first worked in. The label is the root's name, numbered when the
  * session's folder or an earlier label has it (addedFolders' way). At most $limit - folders.length of them, so with the
  * added folders they stay within what one send carries. A drive, a root or a home folder is never one: its name is
- * the person's. Never throws.
+ * the person's. Each carries own: {subjects, printed}, what tells the agent's commits there from the others' (the
+ * titles its git commits gave, the short hashes git printed for them), for folderGitContexts to send only those.
+ * Never throws.
  */
 export function shellFolders(agent, files, cwd, folders = [], limit = MAX_FOLDERS) {
     try {
@@ -79,18 +89,28 @@ export function shellFolders(agent, files, cwd, folders = [], limit = MAX_FOLDER
         const main = cwd ? normalizeDir(cwd) : '';
         const used = [main && !bare(main) ? lastPart(main).toLowerCase() : '', ...folders.map((f) => String(f.label).toLowerCase())];
         const out = [];
-        for (const dir of shellWorkFolders(agent, files, cwd)) {
-            if (out.length >= room) break;
-            if (!isDirectory(dir)) continue;
-            const root = topLevel(dir);
-            if (!root || seen.has(pathKey(root))) continue;
+        // A repository's commits named from any of its folders (`cd api/src && git commit`, `git -C api commit`).
+        const byRoot = new Map();
+        for (const work of shellWork(agent, files, cwd)) {
+            if (!isDirectory(work.dir)) continue;
+            const root = topLevel(work.dir);
+            if (!root) continue;
+            const known = byRoot.get(pathKey(root));
+            if (known) {
+                known.subjects.push(...work.subjects.filter((s) => !known.subjects.includes(s)));
+                known.printed.push(...work.printed.filter((s) => !known.printed.includes(s)));
+                continue;
+            }
+            if (out.length >= room || seen.has(pathKey(root))) continue;
             seen.add(pathKey(root));
             if (bare(normalizeDir(root))) continue;
             const name = lastPart(root);
             let label = name;
             for (let n = 2; used.includes(label.toLowerCase()); n++) label = `${name} ${n}`;
             used.push(label.toLowerCase());
-            out.push({ dir: root, label });
+            const folder = { dir: root, label, own: { subjects: [...work.subjects], printed: [...work.printed] } };
+            byRoot.set(pathKey(root), folder.own);
+            out.push(folder);
         }
 
         return out;
@@ -106,14 +126,93 @@ export function shellFolders(agent, files, cwd, folders = [], limit = MAX_FOLDER
  * $options: {windows, home} for tests on another platform.
  */
 export function shellWorkFolders(agent, files, cwd = null, options = {}) {
+    return shellWork(agent, files, cwd, options).map((w) => w.dir);
+}
+
+/**
+ * shellWorkFolders' folders with what the agent committed in each: [{dir, subjects, printed}], subjects the titles its
+ * git commit commands there gave (subjectOf), printed the short hashes git answered them with, in lower case.
+ */
+export function shellWork(agent, files, cwd = null, options = {}) {
     const read = READERS[agent];
     const found = new Map();
-    const add = (dir) => {
-        if (typeof dir === 'string' && dir !== '' && !found.has(pathKey(dir))) found.set(pathKey(dir), dir);
+    // The folders of a git commit call by the call's id, until its result says what git printed.
+    const pending = new Map();
+    const entry = (dir) => {
+        if (!found.has(pathKey(dir))) found.set(pathKey(dir), { dir, subjects: [], printed: [] });
+        return found.get(pathKey(dir));
     };
-    if (read) for (const file of files) read(file, cwd, add, { windows: process.platform === 'win32', home: homedir(), ...options });
+    const sink = {
+        add(dir) {
+            if (typeof dir === 'string' && dir !== '') entry(dir);
+        },
+        commit(dirs, subject, id) {
+            const entries = dirs.map(entry);
+            for (const e of entries) if (subject && !e.subjects.includes(subject)) e.subjects.push(subject);
+            if (id) pending.set(id, entries);
+        },
+        result(id, output) {
+            const entries = pending.get(id);
+            if (!entries) return;
+            pending.delete(id);
+            for (const m of textOf(output).matchAll(GIT_COMMITTED)) {
+                for (const e of entries) if (!e.printed.includes(m[1].toLowerCase())) e.printed.push(m[1].toLowerCase());
+            }
+        },
+        waiting: () => pending.size > 0,
+    };
+    if (read) for (const file of files) read(file, cwd, sink, { windows: process.platform === 'win32', home: homedir(), ...options });
 
     return [...found.values()];
+}
+
+/** Walks a command for $sink: the folders it changed history in, and those it ran git commit in with the title it gave. */
+function walked(command, state, options, sink, id) {
+    const commits = [];
+    walkCommand(command, state, { ...options, commits }).forEach(sink.add);
+    if (commits.length) sink.commit(commits, subjectOf(command), id);
+}
+
+function walkedArgv(argv, state, options, sink, id) {
+    const commits = [];
+    walkArgv(argv, state, { ...options, commits }).forEach(sink.add);
+    if (!commits.length) return;
+    const words = argv.filter((a) => typeof a === 'string');
+    // A shell's script is the command; a bare argv reads as one with its words quoted.
+    const script = words.find((w, i) => i > 0 && /^-[a-z]*c[a-z]*$|^-command$|^\/[ck]$/i.test(words[i - 1] ?? ''));
+    sink.commit(commits, subjectOf(script ?? words.map((w) => (/[\s"]/.test(w) ? `"${w.replace(/["\\]/g, '\\$&')}"` : w)).join(' ')), id);
+}
+
+/**
+ * The title of the commit a git commit command makes, as far as the command says, as the site reads it
+ * (WorkMemory::subjectOf): its first `-m` (`-m "…"`, `-am '…'`, `--message=…`), or the first line of the message piped
+ * from a heredoc (`<<'EOF'`) or a PowerShell here-string (`@'`). Empty when the command does not say (`-F file`, the
+ * editor, `--amend --no-edit`).
+ */
+export function subjectOf(command) {
+    if (typeof command !== 'string') return '';
+    let subject;
+    const m = command.match(/(?:^|\s)(?:-[a-zA-Z]*m|--message)(?:=|\s*)(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/u);
+    if (m) subject = m[1] !== undefined ? m[1].replace(/\\(.)/g, (_, c) => ({ n: '\n', t: '\t', r: '\r' })[c] ?? c) : (m[2] ?? m[3]);
+    else {
+        const h = command.match(/(?:<<-?\s*(["']?)\w+\1[^\n]*|@["'])\n\s*([^\n]*\S[^\n]*)/u);
+        if (!h) return '';
+        subject = h[2];
+    }
+
+    return [...subject.split('\n')[0]].slice(0, 200).join('').trim();
+}
+
+/** A tool result's text: a string, text blocks ([{type: 'text', text}]) or Codex's {output}, as JSON text too. */
+function textOf(value) {
+    if (typeof value === 'string') {
+        const wrapped = value.startsWith('{') ? parse(value) : null;
+        return typeof wrapped?.output === 'string' ? wrapped.output : value;
+    }
+    if (Array.isArray(value)) return value.map((b) => (typeof b === 'string' ? b : typeof b?.text === 'string' ? b.text : '')).join('\n');
+    if (value && typeof value === 'object') return textOf(value.output ?? value.content ?? value.text ?? '');
+
+    return '';
 }
 
 const READERS = {
@@ -124,11 +223,16 @@ const READERS = {
     codex: codexShell,
 };
 
-function claudeShell(file, cwd, add, options) {
+function claudeShell(file, cwd, sink, options) {
     for (const path of [file, ...subagentFiles(file)]) {
         const state = { cwd: cwd ? normalizeDir(cwd) : null, stack: [], prev: null };
         let lineCwd = null;
         for (const line of eachLine(path)) {
+            // What git printed for a git commit call of the agent's.
+            if (sink.waiting() && line.includes('"tool_result"')) {
+                const d = parse(line);
+                if (d?.type === 'user') for (const b of blocks(d.message)) if (b?.type === 'tool_result') sink.result(b.tool_use_id, b.content);
+            }
             // Claude Code put the shell back into the project folder after a command left it.
             if (line.includes(RESET)) {
                 const reset = line.match(/Shell cwd was reset to ((?:[^"\\]|\\.)+)/);
@@ -146,7 +250,7 @@ function claudeShell(file, cwd, add, options) {
             }
             for (const b of blocks(d.message)) {
                 if (b?.type !== 'tool_use' || (b.name !== 'Bash' && b.name !== 'PowerShell')) continue;
-                walkCommand(b.input?.command, state, { ...options, posix: b.name === 'Bash' }).forEach(add);
+                walked(b.input?.command, state, { ...options, posix: b.name === 'Bash' }, sink, b.id);
             }
         }
     }
@@ -164,12 +268,16 @@ function subagentFiles(file) {
     }
 }
 
-function piShell(file, cwd, add, options) {
+function piShell(file, cwd, sink, options) {
     let base = cwd ?? null;
     for (const line of eachLine(file)) {
         if (line.includes('"type":"session"')) {
             const d = parse(line);
             if (d?.type === 'session' && typeof d.cwd === 'string' && d.cwd !== '') base = d.cwd;
+        }
+        if (sink.waiting() && line.includes('"toolResult"')) {
+            const m = parse(line)?.message;
+            if (m?.role === 'toolResult') sink.result(m.toolCallId, m.content);
         }
         if (!line.includes('"toolCall"') || !line.includes('"name":"bash"')) continue;
         const d = parse(line);
@@ -177,24 +285,25 @@ function piShell(file, cwd, add, options) {
         for (const b of blocks(d.message)) {
             if (b?.type !== 'toolCall' || b.name !== 'bash') continue;
             // Each call is a shell of its own, started in the session's folder.
-            walkCommand(b.arguments?.command, fresh(base), { ...options, posix: true }).forEach(add);
+            walked(b.arguments?.command, fresh(base), { ...options, posix: true }, sink, b.id);
         }
     }
 }
 
-function cursorShell(file, cwd, add, options) {
+function cursorShell(file, cwd, sink, options) {
     for (const line of eachLine(file)) {
         if (!line.includes('"tool_use"') || !CURSOR_TOOL.test(line)) continue;
         const d = parse(line);
         if (d?.role !== 'assistant') continue;
         for (const b of blocks(d.message)) {
             if (b?.type !== 'tool_use' || (b.name !== 'Shell' && b.name !== 'run_terminal_cmd')) continue;
-            walkCommand(b.input?.command, fresh(cwd), { ...options, posix: true }).forEach(add);
+            // Cursor keeps no tool results: only the command's title tells its commit.
+            walked(b.input?.command, fresh(cwd), { ...options, posix: true }, sink, null);
         }
     }
 }
 
-function antigravityShell(file, cwd, add, options) {
+function antigravityShell(file, cwd, sink, options) {
     for (const line of eachLine(file)) {
         if (!line.includes('"run_command"')) continue;
         const d = parse(line);
@@ -203,36 +312,38 @@ function antigravityShell(file, cwd, add, options) {
             if (c?.name !== 'run_command') continue;
             const base = typeof c.args?.Cwd === 'string' && c.args.Cwd !== '' ? c.args.Cwd : cwd;
             // Antigravity runs the line in the computer's shell: PowerShell on Windows.
-            walkCommand(c.args?.CommandLine, fresh(base), { ...options, posix: !options.windows }).forEach(add);
+            walked(c.args?.CommandLine, fresh(base), { ...options, posix: !options.windows }, sink, null);
         }
     }
 }
 
-function codexShell(file, cwd, add, options) {
+function codexShell(file, cwd, sink, options) {
     let base = cwd ?? null;
     for (const line of eachLine(file)) {
         if (base === null && (line.includes('"session_meta"') || line.includes('"turn_context"'))) {
             const d = parse(line);
             if ((d?.type === 'session_meta' || d?.type === 'turn_context') && typeof d.payload?.cwd === 'string' && d.payload.cwd !== '') base = d.payload.cwd;
         }
-        if (!line.includes('"function_call"') && !line.includes('"local_shell_call"') && !line.includes('"custom_tool_call"')) continue;
+        if (!line.includes('"function_call') && !line.includes('"local_shell_call"') && !line.includes('"custom_tool_call')) continue;
         const p = parse(line)?.payload;
         if (!p || typeof p !== 'object') continue;
-        if (p.type === 'function_call' && CODEX_TOOLS.has(p.name)) {
+        const id = typeof p.call_id === 'string' ? p.call_id : null;
+        if (p.type === 'function_call_output' || p.type === 'custom_tool_call_output' || p.type === 'local_shell_call_output') sink.result(p.call_id, p.output);
+        else if (p.type === 'function_call' && CODEX_TOOLS.has(p.name)) {
             const args = typeof p.arguments === 'string' ? parse(p.arguments) : p.arguments;
             if (!args || typeof args !== 'object') continue;
             const workdir = [args.workdir, args.cwd, args.working_directory].find((w) => typeof w === 'string' && w !== '');
             const state = fresh(workdir ?? base);
-            if (Array.isArray(args.command)) walkArgv(args.command, state, options).forEach(add);
-            else walkCommand(typeof args.command === 'string' ? args.command : args.cmd, state, { ...options, posix: !options.windows }).forEach(add);
+            if (Array.isArray(args.command)) walkedArgv(args.command, state, options, sink, id);
+            else walked(typeof args.command === 'string' ? args.command : args.cmd, state, { ...options, posix: !options.windows }, sink, id);
         } else if (p.type === 'local_shell_call' && p.action && typeof p.action === 'object') {
             const workdir = typeof p.action.working_directory === 'string' && p.action.working_directory !== '' ? p.action.working_directory : null;
-            if (Array.isArray(p.action.command)) walkArgv(p.action.command, fresh(workdir ?? base), options).forEach(add);
+            if (Array.isArray(p.action.command)) walkedArgv(p.action.command, fresh(workdir ?? base), options, sink, id);
         } else if (p.type === 'custom_tool_call' && p.name === 'exec' && typeof p.input === 'string') {
             // The exec tool's script: text(await tools.exec_command({cmd: "git …", "workdir": "E:/dev/x"}))
             const workdir = jsString(p.input.match(/["']?workdir["']?\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/)?.[1]);
             const cmd = jsString(p.input.match(/["']?cmd["']?\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/)?.[1]);
-            walkCommand(cmd, fresh(workdir ?? base), { ...options, posix: !options.windows }).forEach(add);
+            walked(cmd, fresh(workdir ?? base), { ...options, posix: !options.windows }, sink, id);
         }
     }
 }
@@ -381,6 +492,7 @@ function gitCommand(args, state, options, wrote) {
     }
     const sub = args[j]?.word.toLowerCase();
     if (sub && WRITES.has(sub) && folder) wrote.push(folder);
+    if (sub === 'commit' && folder) options.commits?.push(folder);
 }
 
 /**

@@ -501,8 +501,13 @@ test('a folder added to the session is named, never shown by its path, and its r
     assert.doesNotMatch(slim, new RegExp(folder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\\\/]src'), 'the folder goes by its name, not its path');
 });
 
-test('a repository the agent committed to from the shell goes with its commits, as a folder added to the session would', async () => {
+test('a repository the agent committed to from the shell goes with its own commits, not the others made there meanwhile', async () => {
     const api = makeRepo('git@github.com:mara/shop-api.git');
+    // Someone else's commit in the same repository while the session was open: it is not the session's to send.
+    writeFileSync(join(api.dir, 'README.md'), 'by hand\n');
+    const date = '2026-09-01T10:50:00Z';
+    await run('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', '-C', api.dir, 'add', '.'], { env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } });
+    await run('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', '-C', api.dir, 'commit', '-q', '-m', 'Update the README by hand'], { env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } });
     const session = 'a1b2c3d4-0000-4000-8000-0000000000a2';
     const at = (s) => `2026-09-01T10:0${s}:00.000Z`;
     // The real shape: cd into the other repository, commit there with the message through a heredoc, all in one call.
@@ -511,7 +516,10 @@ test('a repository the agent committed to from the shell goes with its commits, 
         { type: 'user', cwd: repo.dir, message: { role: 'user', content: 'Raise the limit in the API too.' }, timestamp: at(0) },
         { type: 'assistant', cwd: repo.dir, message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command, description: 'Commit in the API' } }] }, timestamp: at(1) },
         { type: 'user', cwd: repo.dir, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: `[main ${api.hashes[2].slice(0, 7)}] fix: raise the limit` }] }, timestamp: at(2) },
-        { type: 'assistant', cwd: repo.dir, message: { role: 'assistant', content: [{ type: 'text', text: 'Committed in the API.' }] }, timestamp: at(3) },
+        // git -q prints nothing: the title the command gives tells the commit.
+        { type: 'assistant', cwd: repo.dir, message: { role: 'assistant', content: [{ type: 'tool_use', id: 't2', name: 'Bash', input: { command: `git -C '${api.dir}' commit -q -m "Add a limiter keyed by email"` } }] }, timestamp: at(3) },
+        { type: 'user', cwd: repo.dir, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't2', content: '' }] }, timestamp: at(4) },
+        { type: 'assistant', cwd: repo.dir, message: { role: 'assistant', content: [{ type: 'text', text: 'Committed in the API.' }] }, timestamp: at(5) },
     ];
     writeFileSync(join(home, 'projects', 'C--code-shop', `${session}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
     const folder = api.dir.replace(/\\/g, '/').split('/').pop();
@@ -526,8 +534,13 @@ test('a repository the agent committed to from the shell goes with its commits, 
     assert.equal(sent.length, 1);
     assert.equal(sent[0].folder, folder);
     assert.equal(sent[0].remote, 'https://github.com/mara/shop-api');
-    // The commit's hash is here: the site can place it by it.
+    // The agent's commits are here, the one git printed and the one of its title: the site can place them. The commit
+    // made by hand meanwhile is not, not even its hash, and no shortstat counts it in.
     assert.deepEqual(sent[0].commits.shas, [api.hashes[2], api.hashes[1]]);
+    assert.deepEqual(sent[0].commits.subjects, ['Cover the limiter with tests', 'Add a limiter keyed by email']);
+    assert.equal(sent[0].commits.count, 2);
+    assert.equal(sent[0].shortstat, null);
+    assert.doesNotMatch(received.toString('utf8'), /Update the README by hand/);
     assert.doesNotMatch(received.toString('utf8'), new RegExp(api.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\\/g, '[\\\\/]')), 'the folder goes by its name, not its path');
 });
 

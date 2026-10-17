@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { gitBashPath, normalizeDir, resolveShellPath, shellFolders, shellWorkFolders, walkArgv, walkCommand } from '../scripts/lib/shellfolders.mjs';
+import { execFileSync } from 'node:child_process';
+import { folderGitContexts } from '../scripts/lib/git.mjs';
+import { gitBashPath, normalizeDir, resolveShellPath, shellFolders, shellWork, shellWorkFolders, subjectOf, walkArgv, walkCommand } from '../scripts/lib/shellfolders.mjs';
 import { makeRepo } from './helpers.mjs';
 
 const fixtures = fileURLToPath(new URL('./fixtures/slim/', import.meta.url));
@@ -140,6 +142,47 @@ test('Claude Code: Bash cds keep between calls until Claude Code resets the shel
     jsonl(join(dir, id, 'subagents'), 'agent-1.jsonl', [bash('cd /home/you/sub && git push')]);
 
     assert.deepEqual(shellWorkFolders('claude-code', [file], '/home/you/shop', NIX), ['/home/you/shop-api', '/home/you/other', '/home/you/moved', '/home/you/sub']);
+    // What tells the agent's commits there: the titles its git commit gave, the hashes git printed for them.
+    assert.deepEqual(shellWork('claude-code', [file], '/home/you/shop', NIX).map((w) => [w.dir, w.subjects, w.printed]), [
+        ['/home/you/shop-api', ['Raise the limit'], ['1234567']],
+        ['/home/you/other', ['x'], []],
+        ['/home/you/moved', [], []],
+        ['/home/you/sub', [], []],
+    ]);
+});
+
+test('the title a git commit command gives, as the site reads it', () => {
+    assert.equal(subjectOf('git commit -m "Raise the limit" -m "Body"'), 'Raise the limit');
+    assert.equal(subjectOf("git commit -am 'Raise the limit'"), 'Raise the limit');
+    assert.equal(subjectOf('git commit --message=fix'), 'fix');
+    assert.equal(subjectOf('git commit -m "Say \\"hi\\""'), 'Say "hi"');
+    assert.equal(subjectOf("cd ../api && git commit -q -F - <<'EOF'\nfeat(api): raise the limit\n\nWhy.\nEOF"), 'feat(api): raise the limit');
+    assert.equal(subjectOf("git commit -F - @'\nfix: PowerShell here-string\n'@"), 'fix: PowerShell here-string');
+    assert.equal(subjectOf('git commit --amend --no-edit'), '');
+    assert.equal(subjectOf('git commit -F msg.txt'), '');
+});
+
+test('Codex and Pi: what git printed in a call\'s output names the agent\'s commit', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-shell-'));
+    const item = (payload) => ({ timestamp: '2026-09-01T10:00:00.000Z', type: 'response_item', payload });
+    const codex = jsonl(dir, 'rollout-2026-09-01T10-00-00-s2.jsonl', [
+        { timestamp: '2026-09-01T10:00:00.000Z', type: 'session_meta', payload: { id: 's2', cwd: '/home/you/shop' } },
+        item({ type: 'function_call', name: 'shell', call_id: 'c1', arguments: JSON.stringify({ command: ['git', 'commit', '-m', 'Raise the limit'], workdir: '/home/you/api' }) }),
+        item({ type: 'function_call_output', call_id: 'c1', output: JSON.stringify({ output: '[main abcdef1] Raise the limit\n 1 file changed', metadata: { exit_code: 0 } }) }),
+        item({ type: 'function_call', name: 'exec_command', call_id: 'c2', arguments: JSON.stringify({ cmd: 'git commit -q -F msg.txt', workdir: '/home/you/api2' }) }),
+        item({ type: 'function_call_output', call_id: 'c2', output: '' }),
+    ]);
+    assert.deepEqual(shellWork('codex', [codex], null, NIX).map((w) => [w.dir, w.subjects, w.printed]), [
+        ['/home/you/api', ['Raise the limit'], ['abcdef1']],
+        ['/home/you/api2', [], []],
+    ]);
+
+    const pi = jsonl(dir, '2026-09-01T10-00-00_p2.jsonl', [
+        { type: 'session', version: 3, id: 'p2', timestamp: '2026-09-01T10:00:00.000Z', cwd: '/home/you/shop' },
+        { type: 'message', message: { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash', arguments: { command: 'cd ../api && git commit -q -F msg.txt && git log -1' } }] } },
+        { type: 'message', message: { role: 'toolResult', toolCallId: 'c1', content: [{ type: 'text', text: '[detached HEAD 0123abc] Raise the limit' }] } },
+    ]);
+    assert.deepEqual(shellWork('pi', [pi], null, NIX).map((w) => [w.dir, w.subjects, w.printed]), [['/home/you/api', [], ['0123abc']]]);
 });
 
 test('Codex: argv or text, from the call\'s workdir, else the rollout\'s cwd; local_shell_call and the exec script tool too', () => {
@@ -225,4 +268,46 @@ test('with git: the roots of the repositories worked in, other than the session\
         const viaBash = jsonl(dir, 'gitbash.jsonl', [bash(`cd ${gitBash} && git commit -m x`)]);
         same(shellFolders('claude-code', [viaBash], own.dir)[0]?.dir, real(api.dir));
     }
+});
+
+test('with git: of a repository worked in from the shell, only the agent\'s commits go, not another\'s made there meanwhile', () => {
+    const own = makeRepo();
+    const api = makeRepo('git@github.com:mara/shop-api.git');
+    const commit = (subject, date) => {
+        writeFileSync(join(api.dir, 'app.txt'), subject);
+        const run = (args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', '-C', api.dir, ...args], { env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date }, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+        run(['add', '.']);
+        run(['commit', '-q', '-m', subject]);
+        return run(['rev-parse', 'HEAD']);
+    };
+    // makeRepo's commits at 10:10 and 10:40 fall in the session; one more at 10:50, by hand.
+    const theirs = commit('Update the README by hand', '2026-09-01T10:50:00Z');
+    const dir = mkdtempSync(join(tmpdir(), 'ct-shell-'));
+    const bash = (id, command) => ({ type: 'assistant', cwd: own.dir, message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } });
+    const result = (id, text) => ({ type: 'user', cwd: own.dir, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } });
+    const started = Date.parse('2026-09-01T10:00:00Z');
+
+    // One commit of the agent's known by its title (git -q printed nothing), one by the hash git printed.
+    const file = jsonl(dir, 'own.jsonl', [
+        bash('t1', `cd '${api.dir}' && git commit -q -m "Add a limiter keyed by email"`),
+        result('t1', ''),
+        bash('t2', `git -C '${api.dir}' commit -F msg.txt`),
+        result('t2', `[main ${api.hashes[2].slice(0, 7)}] Cover the limiter with tests`),
+    ]);
+    const [context] = folderGitContexts(shellFolders('claude-code', [file], own.dir), own.dir, started);
+    assert.deepEqual(context.commits.shas, [api.hashes[2], api.hashes[1]]);
+    assert.deepEqual(context.commits.subjects, ['Cover the limiter with tests', 'Add a limiter keyed by email']);
+    assert.equal(context.commits.count, 2);
+    assert.equal(context.commits.files.length, 2);
+    assert.equal(context.shortstat, null, 'a shortstat of the range would count the others\' work in');
+    assert.ok(!context.commits.shas.includes(theirs), 'the commit made by hand meanwhile does not go');
+
+    // A push only, or a commit nothing tells (no title, nothing printed): the repository does not go at all.
+    const pushed = jsonl(dir, 'pushed.jsonl', [bash('t1', `git -C '${api.dir}' push`), bash('t2', `git -C '${api.dir}' commit -q -F msg.txt`), result('t2', '')]);
+    assert.equal(shellFolders('claude-code', [pushed], own.dir).length, 1);
+    assert.deepEqual(folderGitContexts(shellFolders('claude-code', [pushed], own.dir), own.dir, started), []);
+
+    // A folder added to the session keeps all its commits, the others' too.
+    const added = folderGitContexts([{ dir: api.dir, label: 'api' }], own.dir, started);
+    assert.deepEqual(added[0].commits.shas, [theirs, api.hashes[2], api.hashes[1]]);
 });

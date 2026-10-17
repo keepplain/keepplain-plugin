@@ -27,8 +27,8 @@ function git(cwd, args) {
  * When each commit of the range was committed and which files it changed, as paths from the repository's root, by its
  * hash. Unquoted, so a name in another script stays readable; a merge lists none.
  */
-function commitDetails(cwd, range) {
-    const text = git(cwd, ['-c', 'core.quotePath=false', 'log', '--format=%x00%H%x09%ct', '--name-only', '--no-renames', `--max-count=${MAX_SHAS}`, range]) ?? '';
+function commitDetails(cwd, range, max = MAX_SHAS) {
+    const text = git(cwd, ['-c', 'core.quotePath=false', 'log', '--format=%x00%H%x09%ct', '--name-only', '--no-renames', `--max-count=${max}`, range]) ?? '';
     const details = new Map();
     for (const record of text.split('\0').slice(1)) {
         const [head, ...lines] = record.split('\n');
@@ -140,22 +140,58 @@ export function parseShortstat(line) {
  * repository other than the session's own, named as the session names the folder (slim.mjs, addedFolders). HEAD at
  * the start is estimated: the SessionStart hook sees only the session's own folder. At most five.
  *
- * @param folders    [{dir, label}] from addedFolders
+ * A repository the agent only committed to from the shell (lib/shellfolders.mjs) comes with own: of it only the
+ * commits own tells as the agent's go (ownCommits), and none at all when there are none.
+ *
+ * @param folders    [{dir, label}] from addedFolders, [{dir, label, own}] from shellFolders
  * @param cwd        the session's own folder, whose repository the main context already covers
  */
 export function folderGitContexts(folders, cwd, startedAt, past = null) {
     const own = cwd ? git(cwd, ['rev-parse', '--show-toplevel']) : null;
     const seen = new Set(own ? [own] : []);
     const contexts = [];
-    for (const { dir, label } of folders) {
+    for (const folder of folders) {
+        const { dir, label } = folder;
         const top = git(dir, ['rev-parse', '--show-toplevel']);
         if (!top || seen.has(top) || contexts.length >= 5) continue;
         seen.add(top);
-        const context = gitContext(dir, null, startedAt, past ? { endedAt: past.endedAt } : null);
+        let context = gitContext(dir, null, startedAt, past ? { endedAt: past.endedAt } : null, folder.own ?? null);
+        if (folder.own && !context?.commits.count) context = null;
         if (context) contexts.push({ folder: label, ...context });
     }
 
     return contexts;
+}
+
+/** Commits looked through for the agent's own in a repository it committed to from the shell: others' may be many. */
+export const MAX_OWN_SEARCH = 1000;
+/** Shorter than this, a commit's title matches another's only whole ("fix" is the start of many): the site's SUBJECT_MIN. */
+const SUBJECT_MIN = 12;
+
+/** A commit's title as two sources of it compare: one spacing, one case, no quotes around it (the site's subjectKey). */
+export function subjectKey(subject) {
+    const key = String(subject ?? '').replace(/\s+/gu, ' ').trim().toLowerCase();
+
+    return [...key.replace(/^["']+|["']+$/g, '')].slice(0, 200).join('');
+}
+
+/** Whether two titles are of one commit: equal, or one the start of the other when long enough (the site's sameSubject). */
+export function sameSubject(a, b) {
+    const [x, y] = [subjectKey(a), subjectKey(b)];
+    if (x === '' || y === '') return false;
+    const [short, long] = [...x].length <= [...y].length ? [x, y] : [y, x];
+
+    return short === long || ([...short].length >= SUBJECT_MIN && long.startsWith(short));
+}
+
+/**
+ * Whether the commit $sha titled $subject is one the agent made, by $own ({subjects, printed}, shellFolders): git
+ * printed its hash in reply to the agent's commit, or its title is one the agent's git commit gave.
+ */
+export function ownCommit(own, sha, subject) {
+    const hash = String(sha).toLowerCase();
+
+    return (own.printed ?? []).some((short) => hash.startsWith(short)) || (own.subjects ?? []).some((s) => sameSubject(subject, s));
 }
 
 /** Commits made this long after a past session's last line still count as its own: the file is written last. */
@@ -168,8 +204,10 @@ export const PAST_END_SLACK_MS = 2 * 60_000;
  * @param past       a session that ended long ago (the import of past sessions, lib/past.mjs): {endedAt} in ms and the
  *                   {branch} it ran on. HEAD now has the commits of every day since, so its end is the last commit
  *                   before it ended, on its branch when that is still here
+ * @param own        for a repository the agent only committed to from the shell, {subjects, printed} (ownCommit): the
+ *                   commits are then only its own, counted so, and no shortstat, which would be of everyone's
  */
-export function gitContext(cwd, headStart, startedAt, past = null) {
+export function gitContext(cwd, headStart, startedAt, past = null, own = null) {
     if (!cwd || git(cwd, ['rev-parse', '--is-inside-work-tree']) !== 'true') return null;
 
     const ref = past?.branch && git(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${past.branch}`]) ? past.branch : 'HEAD';
@@ -198,7 +236,9 @@ export function gitContext(cwd, headStart, startedAt, past = null) {
     const prefix = git(cwd, ['rev-parse', '--show-prefix']);
     if (prefix) context.prefix = prefix;
 
-    if (headStart && headStart !== headEnd) {
+    if (own) {
+        if (headStart && headStart !== headEnd) context.commits = ownCommits(cwd, `${headStart}..${headEnd}`, own);
+    } else if (headStart && headStart !== headEnd) {
         const range = `${headStart}..${headEnd}`;
         // Hashes next to the titles: the site links each commit on GitHub (KeepPlain plan, stage 12.1).
         const log = git(cwd, ['log', '--format=%H%x09%s', `--max-count=${MAX_SHAS}`, range]);
@@ -220,4 +260,23 @@ export function gitContext(cwd, headStart, startedAt, past = null) {
     }
 
     return context;
+}
+
+/** Of the range's commits, those $own tells as the agent's (ownCommit), in gitContext's commits form. */
+function ownCommits(cwd, range, own) {
+    const log = git(cwd, ['log', '--format=%H%x09%s', `--max-count=${MAX_OWN_SEARCH}`, range]);
+    const entries = (log ? log.split('\n').map((l) => l.split('\t')) : [])
+        .map(([sha, ...s]) => [sha, s.join('\t')])
+        .filter(([sha, subject]) => ownCommit(own, sha, subject))
+        .slice(0, MAX_SHAS);
+    const shas = entries.map(([sha]) => sha);
+    const details = shas.length ? commitDetails(cwd, range, MAX_OWN_SEARCH) : new Map();
+
+    return {
+        count: shas.length,
+        subjects: entries.slice(0, MAX_SUBJECTS).map(([, subject]) => subject.slice(0, 200)),
+        shas,
+        times: shas.map((sha) => details.get(sha)?.at ?? null),
+        files: shas.map((sha) => details.get(sha)?.files ?? []),
+    };
 }
