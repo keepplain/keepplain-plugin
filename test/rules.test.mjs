@@ -156,6 +156,15 @@ test("first the task, then its rules: a stack's rules come with the prompt they 
     assert.equal(await promptHook('Почини воркеры очередей', {}, '3e8b5f4d-0a7c-4b5e-8d6f-9c4a1b5e7da3'), '');
 });
 
+test('a question of where code came from sends the agent to the memory of its sessions, rules on or off', async () => {
+    const said = JSON.parse(await promptHook('Откуда взялся BackfillDailyProductMetrics ?', { ...signedIn, KEEPPLAIN_RULES: '0' }, '4f9c6a5e-1b8d-4c6f-9e7a-0d5b2c6f8eb4'));
+    assert.match(said.hookSpecificOutput.additionalContext, /^KeepPlain: this prompt asks where code came from/);
+    assert.match(said.hookSpecificOutput.additionalContext, /search_my_work .* \/keepplain:resume skill/);
+    assert.match(await promptHook('Who added the retry in this job?', signedIn, '4f9c6a5e-1b8d-4c6f-9e7a-0d5b2c6f8eb4', coders(['hook', 'codex', 'prompt'])), /\$keepplain:resume skill/);
+    // Signed out the memory cannot be asked: nothing.
+    assert.equal(await promptHook('Откуда взялся BackfillDailyProductMetrics ?', {}, '4f9c6a5e-1b8d-4c6f-9e7a-0d5b2c6f8eb4'), '');
+});
+
 test('words meet across forms and languages, and a weak match is no match', () => {
     assert.ok(terms('Очереди и воркеры').has('очере'));
     assert.ok(terms('очередь').has('очере'));

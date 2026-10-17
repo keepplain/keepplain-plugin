@@ -32,7 +32,8 @@
  *   prompt         the git snapshot; Cursor's hook also notes the prompt and which conversation its workspace is in
  *                  (lib/cursor.mjs), and answers {"continue": true}, since Cursor waits for it. Claude Code, Codex and
  *                  Pi: the repository's stack rules this prompt is about, as additionalContext (lib/rules.mjs,
- *                  rulesForPrompt), matched here so the prompt never leaves the computer.
+ *                  rulesForPrompt), matched here so the prompt never leaves the computer; and when the prompt asks
+ *                  where code came from, one line sending the agent to search_my_work after git (lib/provenance.mjs).
  *
  * Git snapshots (lib/snapshots.mjs) are every agent's but Codex's: at the start, at each prompt and after each answer.
  */
@@ -47,6 +48,7 @@ import { readEvent } from './event.mjs';
 import { handoffDue, handoffMessage, handoffOn, handoffTargets, handoffThreshold, nearLimit, readLimits } from './handoff.mjs';
 import { nudgeDue, nudgeMessage, nudgeOn } from './nudge.mjs';
 import { projectRoot } from './playbooks.mjs';
+import { asksProvenance, provenanceContext } from './provenance.mjs';
 import { SESSION_ID } from './session.mjs';
 import { sessionPath } from './sessions.mjs';
 import { pruneSidecars, writeSidecar } from './sidecar.mjs';
@@ -262,6 +264,16 @@ function rulesAtPrompt({ event, site, id }) {
     return rulesForPrompt(site, projectRoot(event.cwd), id, event.prompt);
 }
 
+/**
+ * A question of where code came from (lib/provenance.mjs): one line pointing the agent at the person's memory, which
+ * holds the conversation behind a change. Only with this site's sign-in, in a folder; matched here, the prompt is not kept.
+ */
+function provenanceAtPrompt({ event, agent, site }) {
+    if (!event.cwd || typeof event.prompt !== 'string' || !signedIn(site) || !asksProvenance(event.prompt)) return null;
+
+    return provenanceContext(agent);
+}
+
 const signedIn = (site) => process.env.KEEPPLAIN_TOKEN || process.env.CLAUDE_PLUGIN_OPTION_TOKEN || savedToken(site);
 
 /**
@@ -273,12 +285,14 @@ function prompt({ event, agent, site, id, agentArgs }) {
     if (agent !== 'cursor') {
         const rules = rulesAtPrompt({ event, site, id });
         // What an earlier hook could not show the person (lib/unsaid.mjs): the model says it. Pi keeps the rules in the
-        // system prompt of every run, so its lines come apart, for this run only.
+        // system prompt of every run, so its lines come apart, for this run only, with the line on where code came from.
         const unsaid = unsaidContext(takeUnsaid(agent, id));
-        const context = agent === 'pi' ? rules : [unsaid, rules].filter(Boolean).join('\n\n');
+        const origin = provenanceAtPrompt({ event, agent, site });
+        const once = [unsaid, origin].filter(Boolean).join('\n\n');
+        const context = agent === 'pi' ? rules : [once, rules].filter(Boolean).join('\n\n');
         const out = {};
         if (context) out.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: context };
-        if (agent === 'pi' && unsaid) out.unsaidContext = unsaid;
+        if (agent === 'pi' && once) out.unsaidContext = once;
         if (Object.keys(out).length) console.log(JSON.stringify(out));
         return;
     }
