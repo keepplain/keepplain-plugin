@@ -58,7 +58,7 @@ import { repositoryFacts, rulesAtSessionStart, rulesFetchDue, rulesForPrompt, ru
 import { rulesCheckDue, rulesNotice, teamRuleUses } from './team-rules.mjs';
 import { shareCheckDue, takeNotices } from './share.mjs';
 import { keepUnsaid, pruneUnsaid, showsMessages, takeUnsaid, unsaidContext } from './unsaid.mjs';
-import { currentHead, repositoryRoot } from './git.mjs';
+import { currentHead, projectOf, repositoryRoot } from './git.mjs';
 
 export const HOOK_EVENTS = ['session-start', 'prompt', 'stop', 'stop-failure', 'tool', 'session-end'];
 
@@ -271,7 +271,7 @@ function rulesAtPrompt({ event, site, id }) {
 function provenanceAtPrompt({ event, agent, site }) {
     if (!event.cwd || typeof event.prompt !== 'string' || !signedIn(site) || !asksProvenance(event.prompt)) return null;
 
-    return provenanceContext(agent);
+    return provenanceContext(agent, projectOf(event.cwd)?.key);
 }
 
 const signedIn = (site) => process.env.KEEPPLAIN_TOKEN || process.env.CLAUDE_PLUGIN_OPTION_TOKEN || savedToken(site);

@@ -160,6 +160,7 @@ test('a question of where code came from sends the agent to the memory of its se
     const said = JSON.parse(await promptHook('Откуда взялся BackfillDailyProductMetrics ?', { ...signedIn, KEEPPLAIN_RULES: '0' }, '4f9c6a5e-1b8d-4c6f-9e7a-0d5b2c6f8eb4'));
     assert.match(said.hookSpecificOutput.additionalContext, /^KeepPlain: this prompt asks where code came from/);
     assert.match(said.hookSpecificOutput.additionalContext, /search_my_work .* \/keepplain:resume skill/);
+    assert.match(said.hookSpecificOutput.additionalContext, /search_my_work with project_key [0-9a-f]{64},/, "the repository's own key, not one the agent makes up");
     assert.match(await promptHook('Who added the retry in this job?', signedIn, '4f9c6a5e-1b8d-4c6f-9e7a-0d5b2c6f8eb4', coders(['hook', 'codex', 'prompt'])), /\$keepplain:resume skill/);
     // Signed out the memory cannot be asked: nothing.
     assert.equal(await promptHook('Откуда взялся BackfillDailyProductMetrics ?', {}, '4f9c6a5e-1b8d-4c6f-9e7a-0d5b2c6f8eb4'), '');

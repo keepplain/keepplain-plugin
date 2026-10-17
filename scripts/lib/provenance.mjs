@@ -30,7 +30,12 @@ export function asksProvenance(prompt) {
     return ASKS.some((re) => re.test(text));
 }
 
-/** The line for the agent's context. */
-export function provenanceContext(agent) {
-    return `KeepPlain: this prompt asks where code came from or why it is the way it is. Git shows only what changed; the reason is in the conversation the change was made in. After finding the commit (git log or git blame), call search_my_work with the project key, the file paths and the commit with its Agent-Session trailer values, as the ${commandIn(agent, 'resume')} skill says (its step on why code changed), and say what it found, or that no synced session made the change.`;
+/**
+ * The line for the agent's context, with this repository's key (lib/git.mjs, projectOf): an agent told only "the project
+ * key" made one up from the origin address, and found nothing in a project that does not exist.
+ */
+export function provenanceContext(agent, projectKey = null) {
+    const key = projectKey ? `project_key ${projectKey}` : 'no project_key (not in a repository)';
+
+    return `KeepPlain: this prompt asks where code came from or why it is the way it is. Git shows only what changed; the reason is in the conversation the change was made in. After finding the commit (git log or git blame), call search_my_work with ${key}, the file paths and the commit with its Agent-Session trailer values, as the ${commandIn(agent, 'resume')} skill says (its step on why code changed), and say what it found, or that no synced session made the change.`;
 }
