@@ -126,7 +126,9 @@ const LIBRARY_TOOLS = ['search_my_work', 'search_coding_agent_sessions'].map((na
  * for $agent, and the environment that points the plugin at them.
  */
 export function sandbox(agent, site) {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), `kp-live-${agent}-`)));
+    // The native one gives the long name: the Temp of a Windows runner is C:\Users\RUNNER~1\..., and Claude Code asks
+    // before it writes under a path with an 8.3 short name, which `claude -p` cannot answer.
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), `kp-live-${agent}-`)));
     const home = join(root, 'keepplain');
     const repo = join(root, 'repo');
     mkdirSync(repo);
