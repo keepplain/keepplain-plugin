@@ -1,6 +1,6 @@
 {
     "name": "keepplain",
-    "version": "0.18.6",
+    "version": "0.18.7",
     "description": "Send a Codex session to KeepPlain as a draft Build: the prompts, interventions and fails that mattered. You review and publish it on the site. Codex can also look up how other developers did a similar task in the KeepPlain library, and $keepplain:use puts a published Build's playbook into your repository as a skill or a rule. $keepplain:share puts a published Build into its pull request: how the change was built, for the reviewer.",
     "author": { "name": "KeepPlain", "url": "https://keepplain.com" },
     "homepage": "https://keepplain.com/plugins",
