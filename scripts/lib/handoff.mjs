@@ -11,7 +11,7 @@
  *   ~/.keepplain/handoff/<agent>-<id>.md the brief, for `codex "$(cat …)"`
  */
 import { spawnSync } from 'node:child_process';
-import { closeSync, createReadStream, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { commandIn } from './agent.mjs';
@@ -19,7 +19,7 @@ import { detectAgents } from './agents.mjs';
 import { home, writePrivate } from './credentials.mjs';
 import { cursorPrompt } from './cursor.mjs';
 import { piPrompt } from './pi.mjs';
-import { isCodexPrompt, promptText } from './session.mjs';
+import { isCodexPrompt, promptText, transcriptStream } from './session.mjs';
 import { slimLine } from './slim.mjs';
 
 /** The percent of a window past which the handoff is offered. */
@@ -339,7 +339,7 @@ export async function buildBrief({ agent, id, path, cwd = null, env = process.en
     let folder = cwd;
     const ctx = {};
     try {
-        for await (const line of createInterface({ input: createReadStream(path, 'utf8'), crlfDelay: Infinity })) {
+        for await (const line of createInterface({ input: transcriptStream(path), crlfDelay: Infinity })) {
             if (!line.trim()) continue;
             let d;
             try {

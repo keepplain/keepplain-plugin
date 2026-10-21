@@ -27,11 +27,12 @@
  * for the sessions auto mode saw, where their file is and how much of it went. Never anything from the conversation.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { AGENT_IDS } from './agent.mjs';
 import { appendPrivate, home, writePrivate } from './credentials.mjs';
 import { selfCommand } from './runtime.mjs';
+import { transcriptStat } from './session.mjs';
 
 export const AUTO_MODES = ['all', 'team', 'push'];
 /** The modes in which the agents' own hooks send sessions while they run and when they end. */
@@ -191,12 +192,12 @@ export function trackSession(site, id, patch = {}, dir = home(), now = Date.now(
     return sessions[id];
 }
 
+/**
+ * The session's file now: {size, mtimeMs}, or null when it is gone. A Codex rollout auto mode noted may have been
+ * compressed since (lib/session.mjs, transcriptFile): its size is the text's, as the sends count it.
+ */
 function fileStat(path) {
-    try {
-        return statSync(path);
-    } catch {
-        return null;
-    }
+    return transcriptStat(path);
 }
 
 /** Up to 0.11 a session outside the team's repositories was skipped for good; now it is held (trackSession). */

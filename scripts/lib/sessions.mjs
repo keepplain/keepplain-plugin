@@ -12,7 +12,7 @@
  * A folder inside a repository also finds the sessions run at the repository's top. What was sent is remembered in
  * ~/.keepplain/sent.json (the send step; SENT_DAYS, then forgotten) and in auto mode's auto-sessions.json.
  */
-import { closeSync, createReadStream, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import { autoSession, autoSessions } from './auto.mjs';
@@ -21,11 +21,12 @@ import { projectOf, repositoryRoot, worktrees } from './git.mjs';
 import { antigravitySessions, describeAntigravity, findAntigravityTranscript, readAntigravityNotes, transcriptCwd } from './antigravity.mjs';
 import { cursorSessions, describeCursor, findCursorTranscript } from './cursor.mjs';
 import { describePi, findPiSession, piSessions } from './pi.mjs';
-import { codexHome, configDir, findRollout, findTranscript, isCodexPrompt, promptText, rolloutFiles } from './session.mjs';
+import { codexHome, configDir, findRollout, findTranscript, isCodexPrompt, promptText, rolloutFiles, transcriptHead, transcriptStream } from './session.mjs';
 
 const CODEX_DAYS = 30;
 export const SENT_DAYS = 90;
-const ROLLOUT = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_[A-Za-z0-9-]+)?\.jsonl$/i;
+/** A rollout's name; one Codex has not written to for a week is compressed: ….jsonl.zst (lib/session.mjs, transcriptFile). */
+const ROLLOUT = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_[A-Za-z0-9-]+)?\.jsonl(?:\.zst)?$/i;
 
 const sentFile = () => join(home(), 'sent.json');
 const samePath = (a, b) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
@@ -126,7 +127,10 @@ function codexSessions(folders, dir, now, removed, days = CODEX_DAYS) {
         for (const month of files(join(root, year))) {
             for (const day of files(join(root, year, month))) {
                 if (`${year}-${month}-${day}` < oldest) continue;
-                for (const name of files(join(root, year, month, day))) {
+                const names = files(join(root, year, month, day));
+                for (const name of names) {
+                    // Caught as Codex unpacks it to go on with it: the .jsonl is the one.
+                    if (/\.zst$/i.test(name) && names.includes(name.slice(0, -4))) continue;
                     const id = name.match(ROLLOUT)?.[1];
                     const path = join(root, year, month, day, name);
                     const cwd = id ? rolloutCwd(path) : null;
@@ -141,18 +145,13 @@ function codexSessions(folders, dir, now, removed, days = CODEX_DAYS) {
 
 /** The cwd in the rollout's first line (session_meta), read from its start only: rollouts run to hundreds of megabytes. */
 export function rolloutCwd(path) {
-    const buffer = Buffer.alloc(256 * 1024);
-    let fd;
     try {
-        fd = openSync(path, 'r');
-        const text = buffer.toString('utf8', 0, readSync(fd, buffer, 0, buffer.length, 0));
+        const text = transcriptHead(path, 256 * 1024).toString('utf8');
         const raw = text.split('\n')[0].match(/"type":"session_meta".*?"cwd":"((?:[^"\\]|\\.)*)"/)?.[1];
 
         return raw === undefined ? null : JSON.parse(`"${raw}"`);
     } catch {
         return null;
-    } finally {
-        if (fd !== undefined) closeSync(fd);
     }
 }
 
@@ -170,7 +169,7 @@ export async function describeSession({ agent, path }) {
     let title = null;
     // A Codex thread kept in pages is read as one (lib/session.mjs, rolloutFiles).
     for (const { path: file, until } of agent === 'codex' ? rolloutFiles(path) : [{ path, until: null }]) {
-        for await (const line of createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity })) {
+        for await (const line of createInterface({ input: transcriptStream(file), crlfDelay: Infinity })) {
             if (line.includes('"type":"custom-title"')) {
                 try {
                     const t = JSON.parse(line).customTitle;

@@ -33,13 +33,13 @@
  * its title or its printed hash, so a bare hash would be of no use there and only tell of someone else's work.
  */
 import { execFileSync } from 'node:child_process';
-import { closeSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, posix, win32 } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { transcriptChunks } from './session.mjs';
 import { agentOfSession, sessionCwd, sessionPath } from './sessions.mjs';
 
-const CHUNK = 1 << 20;
 /** As many folders as /add-dir gives a session (lib/git.mjs folderGitContexts): the shell's fill what the added ones leave. */
 export const MAX_FOLDERS = 5;
 /** Git subcommands that make or move commits: a folder they ran in has history of the session's. */
@@ -724,28 +724,22 @@ function parse(line) {
     }
 }
 
-/** The lines of a file, read a chunk at a time: a transcript runs to hundreds of megabytes. An unreadable file has none. */
+/**
+ * The lines of a file, read a chunk at a time: a transcript runs to hundreds of megabytes, and a Codex rollout may be
+ * compressed (lib/session.mjs, transcriptChunks). An unreadable file has none, or those read before it failed.
+ */
 function* eachLine(path) {
-    let fd;
-    try {
-        fd = openSync(path, 'r');
-    } catch {
-        return;
-    }
     const decoder = new StringDecoder('utf8');
-    const buffer = Buffer.alloc(CHUNK);
     let rest = '';
     try {
-        for (;;) {
-            const n = readSync(fd, buffer, 0, buffer.length, null);
-            if (n === 0) break;
-            const parts = (rest + decoder.write(buffer.subarray(0, n))).split('\n');
+        for (const chunk of transcriptChunks(path)) {
+            const parts = (rest + decoder.write(chunk)).split('\n');
             rest = parts.pop();
             yield* parts;
         }
-        rest += decoder.end();
-        if (rest) yield rest;
-    } finally {
-        closeSync(fd);
+    } catch {
+        return;
     }
+    rest += decoder.end();
+    if (rest) yield rest;
 }

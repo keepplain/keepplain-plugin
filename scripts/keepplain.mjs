@@ -92,7 +92,7 @@
  * As a script it needs Node.js 20 or newer and nothing else.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { createReadStream, existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { createInterface as createPrompt } from 'node:readline/promises';
@@ -113,7 +113,7 @@ import { describeLibrary, LibraryWatch } from './lib/library.mjs';
 import { nudgeOn, setNudge } from './lib/nudge.mjs';
 import { agentName, buildBrief, copyToClipboard, handoffOn, handoffTargets, handoffThreshold, openTerminal, pruneHandoffs, setHandoff, startCommand, writeBrief } from './lib/handoff.mjs';
 import { MEMORY_TOOLS, workContext, memoryArguments } from './lib/work-memory.mjs';
-import { ForkWatch, SESSION_ID, TitleWatch, cutOwnCommand, formatBytes, formatDuration, isCodexPrompt, newestSessionId, promptText, rolloutFiles, summarize } from './lib/session.mjs';
+import { ForkWatch, SESSION_ID, TitleWatch, cutOwnCommand, formatBytes, formatDuration, isCodexPrompt, newestSessionId, promptText, rolloutFiles, summarize, transcriptStat, transcriptStream } from './lib/session.mjs';
 import { antigravityPrompt, currentAntigravitySession, readAntigravityNotes, transcriptCwd } from './lib/antigravity.mjs';
 import { currentCursorSession, cursorPrompt, readCursorSidecar, withCursorTimes } from './lib/cursor.mjs';
 import { piPrompt } from './lib/pi.mjs';
@@ -544,7 +544,7 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
     for (const [n, { path: file, until }] of files.entries()) {
         const last = n === files.length - 1;
         let edit = null;
-        for await (const line of createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity })) {
+        for await (const line of createInterface({ input: transcriptStream(file), crlfDelay: Infinity })) {
             if (line.trim() === '') continue;
             total++;
             let d;
@@ -613,7 +613,7 @@ async function readSession(path, id, inherited = null, cursorNotes = null, befor
         cwd: cwd ?? cursorNotes?.cwd ?? null,
         headStart,
         branch,
-        bytes: files.reduce((sum, f) => sum + statSync(f.path).size, 0),
+        bytes: files.reduce((sum, f) => sum + (transcriptStat(f.path)?.size ?? 0), 0),
         usage: namedModel(usage.result(), cursorNotes?.model) ?? noted,
         code,
         fork: fork.result(),

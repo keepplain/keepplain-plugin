@@ -1,12 +1,12 @@
 // The sessions of a folder (lib/sessions.mjs): in a repository, those of the whole project (grouping plan, 23.1).
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { folderSessions } from '../scripts/lib/sessions.mjs';
-import { makeRepo } from './helpers.mjs';
+import { describeSession, folderSessions } from '../scripts/lib/sessions.mjs';
+import { compressRollout, makeRepo } from './helpers.mjs';
 
 const line = JSON.stringify({ type: 'user', message: { role: 'user', content: 'Fix it' } });
 
@@ -54,4 +54,33 @@ test('--all: every folder\'s sessions, newest first, each with the folder it ran
     assert.deepEqual(found.map((s) => s.id.slice(-1)), ['2', '1'], 'newest first, none older than 30 days');
     assert.deepEqual(found.map(sessionCwd), ['/home/mara/blog', 'C:\work\shop']);
     assert.deepEqual(allSessions({ env, days: 60 }).map((s) => s.id.slice(-1)), ['2', '1', '3']);
+});
+
+test('Codex rollouts it compressed after a week are listed and described like the others, each once', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'ct-list-zst-'));
+    const folder = realpathSync.native(mkdtempSync(join(tmpdir(), 'ct-shop-')));
+    const put = (id, ageDays) => {
+        const at = new Date(Date.now() - ageDays * 86_400_000);
+        const day = join(home, 'codex', 'sessions', String(at.getFullYear()), String(at.getMonth() + 1).padStart(2, '0'), String(at.getDate()).padStart(2, '0'));
+        mkdirSync(day, { recursive: true });
+        const file = join(day, `rollout-${at.toISOString().slice(0, 19).replace(/:/g, '-')}-${id}.jsonl`);
+        const say = (role, text) => JSON.stringify({ timestamp: at.toISOString(), type: 'response_item', payload: { type: 'message', role, content: [{ type: role === 'user' ? 'input_text' : 'output_text', text }] } });
+        writeFileSync(file, [JSON.stringify({ timestamp: at.toISOString(), type: 'session_meta', payload: { id, cwd: folder } }), say('user', 'Fix the flaky queue test'), say('assistant', 'Fixed.'), say('user', 'Now cover it')].join('\n') + '\n');
+        utimesSync(file, at, at);
+
+        return file;
+    };
+    put('01a0b8a6-0000-7000-8000-000000000001', 1);
+    compressRollout(put('01a0b8a6-0000-7000-8000-000000000002', 10));
+    // Caught as Codex unpacks it again to go on with it: both are there for a moment.
+    const both = put('01a0b8a6-0000-7000-8000-000000000003', 12);
+    const text = readFileSync(both);
+    const { mtime } = statSync(compressRollout(both));
+    writeFileSync(both, text);
+    utimesSync(both, mtime, mtime);
+
+    const env = { CLAUDE_CONFIG_DIR: home, CODEX_HOME: join(home, 'codex') };
+    const found = folderSessions(folder, { env });
+    assert.deepEqual(found.map((s) => [s.id.slice(-1), s.path.endsWith('.zst')]), [['1', false], ['2', true], ['3', false]]);
+    assert.deepEqual(await describeSession(found[1]), { prompts: 2, firstPrompt: 'Fix the flaky queue test', title: null });
 });

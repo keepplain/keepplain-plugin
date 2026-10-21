@@ -1,10 +1,12 @@
 /**
  * Finding and reading the current Claude Code or Codex session. Pure helpers, no network: keepplain.mjs does the talking.
  */
-import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, fstatSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { Readable } from 'node:stream';
 import { piIdOf } from './pi.mjs';
+import { zstdChunks, zstdContentSize } from './zstd.mjs';
 
 /** Session ids (Claude Code's, Codex's threads, Pi's, Cursor's conversations) are UUIDs; anything else never becomes part of a path. */
 export const SESSION_ID = /^[A-Za-z0-9-]{8,100}$/;
@@ -78,11 +80,12 @@ export function codexHome(env = process.env) {
 
 /**
  * Codex rollouts live at <CODEX_HOME>/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl, or
- * …-<thread id>_<rollout id>.jsonl after a revert; archived ones in archived_sessions. The newest one wins.
+ * …-<thread id>_<rollout id>.jsonl after a revert; archived ones in archived_sessions. The newest one wins. One Codex
+ * has not written to for a week is …jsonl.zst (transcriptFile); the .jsonl wins over it.
  */
 export function findRollout(threadId, dir = codexHome()) {
     if (!SESSION_ID.test(threadId ?? '')) return null;
-    const name = new RegExp(`^rollout-.+-${threadId}(?:_[A-Za-z0-9-]+)?\\.jsonl$`);
+    const name = new RegExp(`^rollout-.+-${threadId}(?:_[A-Za-z0-9-]+)?\\.jsonl(?:\\.zst)?$`);
     const found = [];
     const walk = (folder, depth) => {
         let entries;
@@ -100,13 +103,13 @@ export function findRollout(threadId, dir = codexHome()) {
     walk(join(dir, 'sessions'), 3);
     walk(join(dir, 'archived_sessions'), 0);
 
-    return found.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] ?? null;
+    return found.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs || COMPRESSED.test(a) - COMPRESSED.test(b))[0] ?? null;
 }
 
 /** The rollout file whose own id is $fileId: the thread's first file (rollout-…-<id>.jsonl) or a page (…-<thread>_<id>.jsonl). */
 function rolloutFile(fileId, dir) {
     if (!SESSION_ID.test(fileId ?? '')) return null;
-    const name = new RegExp(`^rollout-.+-(?:${fileId}|[0-9a-f-]{36}_${fileId})\\.jsonl$`);
+    const name = new RegExp(`^rollout-.+-(?:${fileId}|[0-9a-f-]{36}_${fileId})\\.jsonl(?:\\.zst)?$`);
     const found = [];
     const walk = (folder, depth) => {
         let entries;
@@ -124,24 +127,119 @@ function rolloutFile(fileId, dir) {
     walk(join(dir, 'sessions'), 3);
     walk(join(dir, 'archived_sessions'), 0);
 
-    return found[0] ?? null;
+    return found.sort((a, b) => COMPRESSED.test(a) - COMPRESSED.test(b))[0] ?? null;
 }
 
 /** The session_meta payload of a rollout, from its first line; null when it has none. */
 export function rolloutMeta(path) {
     // Its instructions make the first line long: read up to the first line break, a megabyte at most.
-    const buffer = Buffer.alloc(1024 * 1024);
-    let fd;
     try {
-        fd = openSync(path, 'r');
-        const text = buffer.toString('utf8', 0, readSync(fd, buffer, 0, buffer.length, 0));
+        const text = transcriptHead(path, 1024 * 1024).toString('utf8');
         const first = JSON.parse(text.slice(0, text.indexOf('\n') >= 0 ? text.indexOf('\n') : undefined));
 
         return first?.type === 'session_meta' && first.payload && typeof first.payload === 'object' ? first.payload : null;
     } catch {
         return null;
+    }
+}
+
+/**
+ * Codex compresses a rollout it has not written to for a week when it starts (codex-rs/rollout/src/compression.rs):
+ * rollout-….jsonl becomes rollout-….jsonl.zst, the time it was changed kept, and the .jsonl goes. One it goes on with
+ * is unpacked to the .jsonl again first. A session being written to is never compressed; the earlier pages of a thread
+ * (rolloutFiles), a past session, or one remembered by a path from before (auto mode) may be. These read a transcript
+ * either way.
+ */
+const COMPRESSED = /\.zst$/i;
+
+/** The file of the transcript at $path as it is now: itself, or its other form; null when neither is there. */
+export function transcriptFile(path) {
+    if (!path) return null;
+    if (existsSync(path)) return path;
+    const other = COMPRESSED.test(path) ? path.slice(0, -4) : `${path}.zst`;
+
+    return existsSync(other) ? other : null;
+}
+
+/** {path, size, mtimeMs} of the transcript at $path as it is now, size counting the text, also of a compressed one; null when it is gone. */
+export function transcriptStat(path) {
+    const file = transcriptFile(path);
+    if (!file) return null;
+    try {
+        const { size, mtimeMs } = statSync(file);
+        if (!COMPRESSED.test(file)) return { path: file, size, mtimeMs };
+        // Codex writes the size into the frame's header (18 bytes at most); a file that does not say it is counted.
+        let text = zstdContentSize(fileStart(file, 18));
+        if (text === null) {
+            text = 0;
+            for (const chunk of zstdChunks(readFileSync(file))) text += chunk.length;
+        }
+
+        return { path: file, size: text, mtimeMs };
+    } catch {
+        return null;
+    }
+}
+
+/** The transcript's text as a stream for readline: what createReadStream(path, 'utf8') is to a .jsonl, unpacked as it is read. */
+export function transcriptStream(path) {
+    const file = transcriptFile(path) ?? path;
+    if (!COMPRESSED.test(file)) return createReadStream(file, 'utf8');
+
+    return Readable.from((function* () {
+        yield* zstdChunks(readFileSync(file));
+    })(), { objectMode: false }).setEncoding('utf8');
+}
+
+/** The transcript's bytes, a Buffer of up to a megabyte at a time: transcripts run to hundreds of megabytes. Throws when unreadable. */
+export function* transcriptChunks(path) {
+    const file = transcriptFile(path) ?? path;
+    if (COMPRESSED.test(file)) {
+        yield* zstdChunks(readFileSync(file));
+        return;
+    }
+    const fd = openSync(file, 'r');
+    try {
+        for (;;) {
+            const buffer = Buffer.allocUnsafe(1024 * 1024);
+            const n = readSync(fd, buffer, 0, buffer.length, null);
+            if (n === 0) return;
+            yield buffer.subarray(0, n);
+        }
     } finally {
-        if (fd !== undefined) closeSync(fd);
+        closeSync(fd);
+    }
+}
+
+/**
+ * The first $bytes of the transcript's text, fewer when it is shorter. Of a compressed one only as much is read and
+ * unpacked as that takes: the rollouts Codex compressed in a month run to a gigabyte, and the list reads them all.
+ */
+export function transcriptHead(path, bytes) {
+    const file = transcriptFile(path) ?? path;
+    if (!COMPRESSED.test(file)) return fileStart(file, bytes);
+    const size = statSync(file).size;
+    for (let read = Math.min(size, 64 * 1024); ; read = Math.min(size, read * 4)) {
+        const chunks = [];
+        let got = 0;
+        for (const chunk of zstdChunks(fileStart(file, read), read < size)) {
+            chunks.push(chunk);
+            got += chunk.length;
+            if (got >= bytes) break;
+        }
+        if (got >= bytes || read === size) return Buffer.concat(chunks).subarray(0, bytes);
+    }
+}
+
+/** The first $bytes of a file as it is, fewer when it is shorter. */
+function fileStart(file, bytes) {
+    const fd = openSync(file, 'r');
+    try {
+        const buffer = Buffer.alloc(Math.min(bytes, fstatSync(fd).size));
+
+        return buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, 0));
+    } finally {
+        closeSync(fd);
     }
 }
 

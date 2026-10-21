@@ -23,7 +23,7 @@
  * hooks are not put there, and enable prints the lines to add instead.
  */
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { agentArgs } from './agent.mjs';
 import { inBackground, sessionAutoMode } from './auto.mjs';
@@ -32,7 +32,7 @@ import { sessionEdits } from './edits.mjs';
 import { shCommand } from './plugin.mjs';
 import { agentOfSession, rolloutCwd, sentAt } from './sessions.mjs';
 import { pruneSnapshots, readSnapshots, snapshotDir } from './snapshots.mjs';
-import { SESSION_ID } from './session.mjs';
+import { SESSION_ID, transcriptStat } from './session.mjs';
 
 export const TRAILER = 'Agent-Session';
 export const GIT_HOOKS = ['prepare-commit-msg', 'pre-push'];
@@ -375,10 +375,7 @@ function files(dir) {
     }
 }
 
+/** When a rollout was written to last, also one Codex compressed after auto mode noted its path; 0 when it is gone. */
 function mtime(path) {
-    try {
-        return statSync(path).mtimeMs;
-    } catch {
-        return 0;
-    }
+    return transcriptStat(path)?.mtimeMs ?? 0;
 }

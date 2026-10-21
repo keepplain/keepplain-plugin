@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { coders, hookCommand, waitFor } from './helpers.mjs';
+import { coders, compressRollout, hookCommand, waitFor } from './helpers.mjs';
 
 const run = promisify(execFile);
 const fixture = (name) => fileURLToPath(new URL(`./fixtures/slim/${name}`, import.meta.url));
@@ -164,4 +164,22 @@ test('a Codex start catches up on Codex sessions only, and turning it off forget
     await cli(['auto', 'off', '--agent=codex']);
     assert.deepEqual(Object.keys(state()), [claude]);
     await cli(['auto', 'off']);
+});
+
+test('a Codex session that never said it ended, compressed by Codex a week later, is caught up all the same', async () => {
+    await cli(['auto', 'on', '--agent=codex']);
+    const quiet = 'c0de0000-0000-4000-8000-000000000006';
+    // Auto mode noted the .jsonl; Codex, started eight days later, compressed it before the hook ran.
+    const path = rollout(quiet, 8 * 24 * 60);
+    saw(quiet, path, 'codex', 8 * 86_400_000);
+    compressRollout(path);
+
+    bodies.length = 0;
+    const current = 'c0de0000-0000-4000-8000-000000000007';
+    assert.equal(await hook('session-start', { session_id: current, transcript_path: rollout(current), cwd: home, hook_event_name: 'SessionStart', source: 'startup' }), '');
+    await logged(new RegExp(`codex ${quiet} sent to your private Builds at the next start`));
+    assert.equal(field(bodies[0], 'session_id'), quiet);
+    assert.equal(field(bodies[0], 'final'), '1');
+    assert.equal(state()[quiet].sent.size, readFileSync(fixture('codex.jsonl')).length, 'the size of the text, as an uncompressed rollout counts it');
+    await cli(['auto', 'off', '--agent=codex']);
 });

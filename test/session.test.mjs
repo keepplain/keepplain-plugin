@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { test } from 'node:test';
-import { ForkWatch, TitleWatch, cutOwnCommand, findRollout, findTranscript, promptText, summarize } from '../scripts/lib/session.mjs';
+import { ForkWatch, TitleWatch, cutOwnCommand, findRollout, findTranscript, promptText, rolloutMeta, summarize, transcriptChunks, transcriptHead, transcriptStat, transcriptStream } from '../scripts/lib/session.mjs';
+import { compressRollout } from './helpers.mjs';
 
 const line = (d) => JSON.stringify(d);
 const prompt = (text, s) => line({ type: 'user', cwd: '/home/you/code/shop', message: { role: 'user', content: text }, timestamp: `2026-09-01T10:${String(s).padStart(2, '0')}:00Z` });
@@ -232,6 +234,36 @@ test('the Codex rollout is found by thread id, a reverted one too', () => {
     writeFileSync(reverted, said('y', 0));
     utimesSync(reverted, new Date(), new Date(Date.now() + 1000));
     assert.equal(findRollout(id, home), reverted);
+});
+
+test('a rollout Codex compressed after a week is found and read as it was, also by the path it had before', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'ct-codex-zst-'));
+    const id = '01a0b8a6-9f98-7701-8110-1a2556f5b096';
+    const day = join(home, 'sessions', '2026', '09', '19');
+    mkdirSync(day, { recursive: true });
+    const plain = join(day, `rollout-2026-09-19T10-52-02-${id}.jsonl`);
+    const text = [codex({ id, cwd: '/home/you/shop' }, 0, 'session_meta'), said('Fix the flaky test — очередь', 1), said('Now the docs', 2)].join('\n') + '\n';
+    const at = new Date('2026-09-19T08:00:00Z');
+    writeFileSync(plain, text);
+    utimesSync(plain, at, at);
+    const zst = compressRollout(plain);
+
+    assert.equal(findRollout(id, home), zst);
+    assert.equal(rolloutMeta(zst).cwd, '/home/you/shop');
+    assert.equal(transcriptHead(zst, 1 << 20).toString('utf8'), text);
+    assert.equal(transcriptHead(zst, 10).toString('utf8'), text.slice(0, 10));
+    assert.deepEqual(transcriptStat(plain), { path: zst, size: Buffer.byteLength(text), mtimeMs: at.getTime() });
+    const lines = [];
+    for await (const l of createInterface({ input: transcriptStream(plain), crlfDelay: Infinity })) lines.push(l);
+    assert.deepEqual(lines, text.trimEnd().split('\n'));
+    assert.equal(Buffer.concat([...transcriptChunks(plain)]).toString('utf8'), text);
+    assert.equal(transcriptStat(join(day, 'rollout-gone.jsonl')), null);
+
+    // Codex unpacks it again to go on with it: caught while both are there, the .jsonl is the one.
+    writeFileSync(plain, text);
+    utimesSync(plain, at, at);
+    assert.equal(findRollout(id, home), plain);
+    assert.equal(transcriptStat(zst).path, zst);
 });
 
 test('a fork names the session it came from and where it left it', () => {

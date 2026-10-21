@@ -16,7 +16,7 @@ import { gitContext } from '../scripts/lib/git.mjs';
 import { rolloutFiles } from '../scripts/lib/session.mjs';
 import { catchUp, trackSession } from '../scripts/lib/auto.mjs';
 import { byProject, describeProjects, findPast, pastDays, pastDue, pastState, queuePast, releaseLock, setPastState, takeLock, teamOffers, touchLock } from '../scripts/lib/past.mjs';
-import { coders, makeRepo, waitFor } from './helpers.mjs';
+import { coders, compressRollout, makeRepo, waitFor } from './helpers.mjs';
 
 const run = promisify(execFile);
 const DAY = 86_400_000;
@@ -191,8 +191,11 @@ test('a Claude app conversation goes once, as its latest session, when that one 
     assert.deepEqual(sessions.map((s) => s.id), [uuid(3), uuid(4), uuid(5)]);
 });
 
-test('a Codex thread kept in pages (Codex 0.160) is read as one, without the way it did not take', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ct-past-pages-'));
+/**
+ * A Codex thread kept in pages (Codex 0.160) under $root/codex: its first file, whose lines from ordinal 3 on are a way
+ * the thread did not take, and the page that goes on from there. {codex, thread, base, next}
+ */
+function pagedThread(root) {
     const codex = join(root, 'codex');
     const day = join(codex, 'sessions', '2026', '10', '11');
     mkdirSync(day, { recursive: true });
@@ -218,16 +221,55 @@ test('a Codex thread kept in pages (Codex 0.160) is read as one, without the way
     ].join('\n') + '\n');
     utimesSync(base, new Date('2026-10-11T08:05:00Z'), new Date('2026-10-11T08:05:00Z'));
 
+    return { codex, thread, base, next };
+}
+
+/** The preview of the thread: what it counts, and the text it prepared to send. */
+async function previewThread(root, codex, thread) {
+    const out = await run(...coders(['preview', thread, '--agent=codex', '--whole', '--json']), { env: { ...process.env, CODEX_HOME: codex, KEEPPLAIN_HOME: join(root, 'ct'), KEEPPLAIN_URL: 'http://127.0.0.1:9' }, cwd: root });
+
+    return { preview: JSON.parse(out.stdout.trim().split('\n').pop()), sent: gunzipSync(readFileSync(join(tmpdir(), 'keepplain', `${thread}.jsonl.gz`))).toString('utf8') };
+}
+
+test('a Codex thread kept in pages (Codex 0.160) is read as one, without the way it did not take', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ct-past-pages-'));
+    const { codex, thread, base, next } = pagedThread(root);
+
     assert.deepEqual(rolloutFiles(next, codex), [{ path: base, until: 3 }, { path: next, until: null }]);
     assert.deepEqual(rolloutFiles(base, codex), [{ path: base, until: null }]);
 
-    const out = await run(...coders(['preview', thread, '--agent=codex', '--whole', '--json']), { env: { ...process.env, CODEX_HOME: codex, KEEPPLAIN_HOME: join(root, 'ct'), KEEPPLAIN_URL: 'http://127.0.0.1:9' }, cwd: root });
-    const preview = JSON.parse(out.stdout.trim().split('\n').pop());
+    const { preview, sent } = await previewThread(root, codex, thread);
     assert.equal(preview.prompts, 2, 'Both pages, without the prompt of the way the thread did not take.');
-    const sent = gunzipSync(readFileSync(join(tmpdir(), 'keepplain', `${thread}.jsonl.gz`))).toString('utf8');
     assert.match(sent, /Fix the flaky queue test/);
     assert.match(sent, /Now cover it with a test/);
     assert.doesNotMatch(sent, /Abandoned/);
+});
+
+test('a page Codex compressed after a week is read with the others: the thread goes whole', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ct-past-pages-zst-'));
+    const { codex, thread, base, next } = pagedThread(root);
+    const zst = compressRollout(base);
+
+    assert.deepEqual(rolloutFiles(next, codex), [{ path: zst, until: 3 }, { path: next, until: null }]);
+    const { preview, sent } = await previewThread(root, codex, thread);
+    assert.equal(preview.prompts, 2);
+    assert.match(sent, /Fix the flaky queue test/);
+    assert.match(sent, /Now cover it with a test/);
+    assert.doesNotMatch(sent, /Abandoned/);
+});
+
+test('a past Codex session Codex compressed after a week is found, with its folder', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ct-past-zst-'));
+    const api = join(root, 'api');
+    mkdirSync(api);
+    const env = { ...process.env, CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex') };
+    const home = join(root, 'ct');
+    mkdirSync(home);
+    compressRollout(codexSession(env.CODEX_HOME, api, uuid(21), 10 * DAY));
+    codexSession(env.CODEX_HOME, api, uuid(22), 2 * DAY);
+
+    const { sessions } = await findPast({ site: 'https://keepplain.test', agents: ['codex'], env, dir: home });
+    assert.deepEqual(sessions.map((s) => [s.id, s.cwd]), [[uuid(21), api], [uuid(22), api]]);
 });
 
 /* ---- the runner, against a stand-in site ---- */

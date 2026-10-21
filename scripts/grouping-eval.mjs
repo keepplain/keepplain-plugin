@@ -15,7 +15,7 @@
  *        put together), at the configured threshold and at others, to choose it. The plan's goal: precision 0.9 or
  *        more at recall 0.6 or more.
  */
-import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { continuationOf } from './lib/continuation.mjs';
@@ -23,7 +23,7 @@ import { projectOf } from './lib/git.mjs';
 import { extractTaskKeys, GROUPING_CONFIG, scoreTask } from './lib/grouping.mjs';
 import { readSidecar } from './lib/sidecar.mjs';
 import { folderSessions } from './lib/sessions.mjs';
-import { isCodexPrompt, promptText } from './lib/session.mjs';
+import { isCodexPrompt, promptText, transcriptStream } from './lib/session.mjs';
 
 const args = process.argv.slice(2);
 const option = (name) => args.filter((a) => a.startsWith(`--${name}=`)).map((a) => a.slice(name.length + 3));
@@ -67,7 +67,7 @@ async function readAll() {
 async function readSession({ agent, id, path }, root) {
     const s = { id, agent, path, prompts: [], files: new Set(), branch: null, head_start: null, title: null, started_at: null, fork: null, continues: null };
     let cwd = null;
-    for await (const line of createInterface({ input: createReadStream(path, 'utf8'), crlfDelay: Infinity })) {
+    for await (const line of createInterface({ input: transcriptStream(path), crlfDelay: Infinity })) {
         let d;
         try {
             d = JSON.parse(line);

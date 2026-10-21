@@ -1,9 +1,10 @@
 // Shared by the tests; not a test file itself.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as zlib from 'node:zlib';
 
 /**
  * KEEPPLAIN_BIN=dist/keepplain-… runs the commands and hooks of the tests on the single file built by
@@ -82,4 +83,68 @@ export function makeRepo(remote = 'git@github.com:mara/shop.git') {
     }
 
     return { dir, hashes };
+}
+
+/**
+ * Text like a rollout's, the same for a seed every time: JSON lines, each with one of a few dozen phrases (some of
+ * their words not ASCII), cut at $bytes. With $binary, bytes nothing compresses. The zstd fixtures are made of these
+ * (test/fixtures/zstd/make.mjs), and kept small by how much the lines repeat: the plugin folder has a size limit.
+ */
+export function sample(bytes, seed = 1, binary = false) {
+    // mulberry32
+    let a = seed >>> 0;
+    const next = () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = Math.imul(a ^ (a >>> 15), a | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    if (binary) return Buffer.from(Array.from({ length: bytes }, () => Math.floor(next() * 256)));
+    const words = 'fix the flaky queue test login route limiter keyed by email retry backoff token cache очередь тест готово — café 🙂 npm run build git commit diff branch main'.split(' ');
+    const phrases = Array.from({ length: 40 }, () => Array.from({ length: 3 + Math.floor(next() * 20) }, () => words[Math.floor(next() * words.length)]).join(' '));
+    const lines = [];
+    for (let size = 0, i = 0; size < bytes; i++) {
+        const text = phrases[Math.floor(next() * phrases.length)];
+        const line = JSON.stringify({ timestamp: new Date(Date.UTC(2026, 9, 1) + i * 7000).toISOString(), type: 'response_item', payload: { type: 'message', role: next() < 0.5 ? 'user' : 'assistant', content: [{ type: 'input_text', text }] } });
+        lines.push(line);
+        size += Buffer.byteLength(line) + 1;
+    }
+
+    return Buffer.from(lines.join('\n') + '\n').subarray(0, bytes);
+}
+
+/**
+ * $bytes as one zstd frame: compressed by node:zlib where this Node has zstd (22.15 on), else in raw blocks, which zstd
+ * allows, so that a test makes a compressed rollout on every Node. The size goes in the header, as Codex writes it.
+ */
+export function zstdFrame(bytes) {
+    if (typeof zlib.zstdCompressSync === 'function') return zlib.zstdCompressSync(bytes, { pledgedSrcSize: bytes.length });
+    const header = Buffer.alloc(13);
+    header.writeUInt32LE(0xfd2fb528, 0);
+    // A single segment, eight bytes of size.
+    header[4] = 0xe0;
+    header.writeBigUInt64LE(BigInt(bytes.length), 5);
+    const blocks = [];
+    for (let at = 0; at === 0 || at < bytes.length; at += 128 * 1024) {
+        const block = bytes.subarray(at, at + 128 * 1024);
+        const last = at + 128 * 1024 >= bytes.length ? 1 : 0;
+        const h = last | (block.length << 3);
+        blocks.push(Buffer.from([h & 0xff, (h >> 8) & 0xff, (h >> 16) & 0xff]), block);
+    }
+
+    return Buffer.concat([header, ...blocks]);
+}
+
+/**
+ * What Codex does to a rollout it has not written to for a week (lib/session.mjs, transcriptFile): $path.zst in its
+ * place, with the time it was changed kept. Returns the new path.
+ */
+export function compressRollout(path) {
+    const { mtime } = statSync(path);
+    const zst = `${path}.zst`;
+    writeFileSync(zst, zstdFrame(readFileSync(path)));
+    utimesSync(zst, mtime, mtime);
+    rmSync(path);
+
+    return zst;
 }

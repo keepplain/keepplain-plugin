@@ -35,7 +35,7 @@
  *              a team that asks for it): consent for the future ones is given. A session the person shares is moved to
  *              the team right after it went (POST /api/v1/teams/{team}/sessions); one sent already, at once.
  */
-import { closeSync, createReadStream, existsSync, openSync, readdirSync, readFileSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -46,7 +46,7 @@ import { cursorPrompt, cursorSlug } from './cursor.mjs';
 import { projectOf, repositoryRoot } from './git.mjs';
 import { piPrompt } from './pi.mjs';
 import { appEarlierLinks } from './continuation.mjs';
-import { isCodexPrompt, promptText, rolloutFiles, SESSION_ID } from './session.mjs';
+import { isCodexPrompt, promptText, rolloutFiles, SESSION_ID, transcriptStream } from './session.mjs';
 import { allSessions, sentAt, sessionCwd } from './sessions.mjs';
 
 export const PAST_DAYS = 30;
@@ -393,7 +393,7 @@ export async function promptLine(session) {
 async function firstPrompt({ agent, path }) {
     let prompt = null;
     for (const { path: file, until } of agent === 'codex' ? rolloutFiles(path) : [{ path, until: null }]) {
-        const stream = createReadStream(file, 'utf8');
+        const stream = transcriptStream(file);
         const lines = createInterface({ input: stream, crlfDelay: Infinity });
         try {
             for await (const line of lines) {
