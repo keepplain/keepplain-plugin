@@ -246,6 +246,22 @@ The same hook (Claude Code, Codex, Pi and Antigravity, with a sign-in) adds one 
 - **What you see**: one line at the start when the rules here change ("KeepPlain added 3 rules to this session: Laravel (2 yours, 1 from Acme)"), and `/keepplain:rules` for the text. In Cursor the line is left out (it has no channel for it); in Pi the rules go into the system prompt.
 - **Off**: `keepplain rules off` on this computer, or `KEEPPLAIN_RULES=0` for a shell.
 
+### Who wrote each line
+
+`keepplain blame <file>` is `git blame` with the agent session behind each line: the agent and the session's name in the gutter, once for each block a session wrote, and a link to the turn where it made the change.
+
+```
+● Claude Code · Harden the webhook   4 │ const TOLERANCE_SEC = 300;
+○ Pi · Seat count sync              19 │ await syncSeats(event.data, { lock: 'team' });
+● Codex · maya, private             22 │ await markPaid(event.data.id, { notify: true });
+  no session found                  25 │ return new Response('ok');
+```
+
+- `●` the session made the commit or the edits in it; `○` its agent edited the file before a commit made by hand, or it only saw the commit. `+1` says the commit has more sessions.
+- Git runs on your computer and the code stays there. The site gets the file's path and its commits (hash, the file's name in each, title, `Agent-Session` trailer, dates) and answers with the sessions you may read; a teammate's session you see in the team's list but may not read is named by its author only. The newest 300 commits of a file are looked up, a hundred a request.
+- A trailer that names a session the site does not hold is looked for on this computer: the gutter shows its name or first prompt, and nothing of it goes anywhere. Not signed in, that is all you get, with the commits' titles for the rest.
+- `-L <from>,<to>` blames those lines, `--rev=<commit>` the file as it was there, `-w` ignores whitespace, `--color=always|never` (colours only in a terminal by default, and never with `NO_COLOR`), `--json` for scripts and the desktop app.
+
 ### On GitHub
 
 A published Build can tell whoever reviews the pull request how the change was built: `/keepplain:share` (`$keepplain:share` in Codex, `/keepplain-share` in Cursor, `keepplain share` in a terminal).
@@ -297,6 +313,7 @@ Each network call, and what goes with it:
 | `GET /b/<slug>/use/<format>.md`, `/t/<team>/rules/<stack>.md` | `use` | `via=cli`, the agent, `write=1` when it writes. The token only for a team's own Build or rules. |
 | `GET /t/<team>/rules/<stack>.md`, `/t/<team>/rules/<stack>.json?since=<version>` | `SessionStart` (in the background, at most every six hours), `use --team` | `via=hook`, `If-None-Match` with the version in the repository, the token. Only for repositories with a team's block. |
 | `GET /api/v1/rules` | `SessionStart` (in the background, at most hourly per repository), `rules` | The repository's stacks (`laravel,php`), its GitHub owner (`acme`, nothing for other hosts), the names of team blocks already in its files, `If-None-Match` with the last version; the token. Not the repository's name, path or files. Not with rules off. |
+| `POST /api/v1/blame` | `blame` | The repository's project key (a hash of its `origin` address, or of its path), the file's path, and for each of its commits (up to 300, a hundred a request) the hash, the file's name in that commit, the first line of its message, its `Agent-Session` trailer and when it and the file's commit before it were made. The token. Never the code. Not when signed out. |
 | `GET /api/v1/share`, `POST /api/v1/share/attachments` | `share` | The Build's slug or this session's id; after a change, the pull request's or the repository's address. The token. |
 | `PATCH /api/v1/share/settings`, `GET /api/v1/share/pending` | `share auto on\|off`; `SessionStart` with the share auto mode on (in the background, at most hourly per repository) | The switch; the GitHub `origin` address of the repository. The token. |
 | `gh pr view`, `gh pr list`, `gh pr edit` (your GitHub CLI) | `share --pr` after your yes; the share auto mode | The pull request's new description, with the block. Your own GitHub sign-in: the plugin never sees it. |

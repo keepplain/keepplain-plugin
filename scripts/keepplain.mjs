@@ -42,6 +42,8 @@
  *   keepplain update [version]                the single file only: replaces itself with the latest release (lib/update.mjs)
  *   keepplain sessions [--limit=N]            the Claude Code, Codex, Cursor and Pi sessions of this folder, newest first (lib/sessions.mjs)
  *     --all [--days=N]                            every folder's, changed in the last 30 days, each with its project
+ *   keepplain blame <file> [-L <from>,<to>]   git blame of a file with the agent session behind each line (lib/blame.mjs):
+ *     --rev=<commit> -w --color=auto|always|never  the commits go to the site, the code never; --json for the desktop app
  *   keepplain build [number|session-id]       in a terminal: preview, a yes or no, send. The number is one from
  *                                                 `sessions`; without one, the newest session. Takes preview's and
  *                                                 send's options. Not without a terminal: nothing may skip the question
@@ -97,6 +99,7 @@ import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { createInterface as createPrompt } from 'node:readline/promises';
 import { gzipSync } from 'node:zlib';
+import { collectBlame, renderBlame } from './lib/blame.mjs';
 import { AUTO_MODES, autoMode, autoSession, catchUp, currentSize, inBackground, logAuto, logFile, recentAuto, RUNNING_MODES, sessionAutoMode, setAutoMode, trackSession } from './lib/auto.mjs';
 import { siteUrl } from './lib/config.mjs';
 import { clearPendingLogin, forgetToken, home as credentialsHome, pendingLogin, savedToken, savedUsername, savePendingLogin, saveToken, writePrivate } from './lib/credentials.mjs';
@@ -221,6 +224,7 @@ try {
     else if (command === 'version' || args.includes('--version')) console.log(`keepplain ${VERSION}`);
     else if (command === 'update') await update(argId, { check: args.includes('--check') });
     else if (command === 'sessions') await sessions();
+    else if (command === 'blame') await blame();
     else if (command === 'build') await build(argId);
     else if (command === 'use') await use(argId);
     else if (command === 'share') await share(argId);
@@ -257,6 +261,7 @@ function help() {
         ['status', 'how things are: sign-in, agents, auto mode'],
         ['sessions [--limit=N] [--all]', "this folder's sessions, newest first; --all: every folder's"],
         ['build [number|session-id]', 'preview a session, ask, then send it as a draft'],
+        ['blame <file> [-L <from>,<to>]', 'git blame with the agent session behind each line'],
         ['use <build> [--as=skill|rule|prompt]', "a published Build's playbook for this repository"],
         ['use --team=<team> --stack=<stack>', "a team's rules for a stack"],
         ['rules [on|off] [--refresh]', 'the rules your sessions here get, or stop them on this computer'],
@@ -1023,6 +1028,41 @@ async function sessions() {
         console.log(`  ${String(i + 1).padEnd(3)} ${when(s.mtimeMs).padEnd(17)} ${(AGENTS[s.agent]?.name ?? s.agent).padEnd(12)} ${where}${String(s.prompts).padEnd(8)} ${(s.sent ? 'yes' : '-').padEnd(5)} ${first}`);
     });
     console.log(`Send one: keepplain build <#>${all ? ' --all' : ''}`);
+}
+
+/**
+ * `blame <file>`: each line's commit and the session behind it (lib/blame.mjs). The commits go to the site when this
+ * computer is signed in, the code never; a trailer naming a session the site does not hold is looked for here.
+ */
+async function blame() {
+    const rest = args.slice(args.indexOf('blame') + 1);
+    let file = null;
+    let lines = option('lines') ?? null;
+    let ignoreWhitespace = false;
+    for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === '-L') lines = rest[++i] ?? '';
+        else if (/^-L./.test(rest[i])) lines = rest[i].slice(2);
+        else if (rest[i] === '-w') ignoreWhitespace = true;
+        else if (!rest[i].startsWith('-') && file === null) file = rest[i];
+    }
+    const result = await collectBlame({
+        file, lines, ignoreWhitespace, rev: option('rev') ?? null,
+        projectKey: (root) => projectOf(root)?.key ?? null,
+        ask: token ? (body) => api('POST', '/api/v1/blame', json(body), true, 30_000) : null,
+        local: async (id) => {
+            const agent = agentOfSession(id, env);
+            const path = agent ? sessionPath(agent, id, env) : null;
+            if (!path) return null;
+            const about = await describeSession({ agent, path });
+
+            return { agent, title: about.title ?? null, first_prompt: about.firstPrompt?.slice(0, 200) ?? null };
+        },
+    });
+    if (JSON_OUT) return emit(result);
+    const choice = option('color') ?? 'auto';
+    if (!['auto', 'always', 'never'].includes(choice)) throw new Failure('--color takes auto, always or never.');
+    const color = choice === 'always' || (choice === 'auto' && Boolean(process.stdout.isTTY) && !env.NO_COLOR && env.TERM !== 'dumb');
+    console.log(renderBlame(result, { color }));
 }
 
 /** The sessions with prompts, described; $limit of them. With --all, every folder's, each with where it ran. */
