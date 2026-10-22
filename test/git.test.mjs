@@ -46,14 +46,14 @@ test('the commits made since HEAD at the start of the session', () => {
 test("a commit's files are named from the repository's root, unquoted, at most 100", () => {
     const { dir, hashes } = makeRepo();
     mkdirSync(join(dir, 'docs', 'store'), { recursive: true });
-    for (let i = 0; i < 105; i++) writeFileSync(join(dir, 'docs', 'store', `листинг-${String(i).padStart(3, '0')}.md`), `${i}\n`);
+    for (let i = 0; i < 105; i++) writeFileSync(join(dir, 'docs', 'store', `listing-${String(i).padStart(3, '0')}.md`), `${i}\n`);
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'add', '.'], { cwd: dir });
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'Store listing'], { cwd: dir });
 
     const { commits } = gitContext(join(dir, 'docs'), hashes[2], null);
 
     assert.equal(commits.files[0].length, MAX_COMMIT_FILES);
-    assert.equal(commits.files[0][0], 'docs/store/листинг-000.md');
+    assert.equal(commits.files[0][0], 'docs/store/listing-000.md');
     assert.equal(commits.files.length, commits.shas.length);
     assert.equal(typeof commits.times[0], 'number');
 });

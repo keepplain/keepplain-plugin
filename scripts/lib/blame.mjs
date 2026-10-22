@@ -7,8 +7,9 @@
  */
 import { execFile } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { relativeTo } from './edits.mjs';
 import { Failure } from './failure.mjs';
 
 const run = promisify(execFile);
@@ -97,8 +98,9 @@ async function locate(file, cwd, rev) {
     if (existsSync(absolute) && statSync(absolute).isDirectory()) throw new Failure(`${file} is a folder: blame takes a file.`);
     const root = (await git(folder, ['rev-parse', '--show-toplevel']).catch(() => '')).trim();
     if (!root) throw new Failure(`${file} is not in a git repository.`);
-    const path = relative(root, absolute).split('\\').join('/');
-    if (!path || path.startsWith('../')) throw new Failure(`${file} is not in the repository at ${root}.`);
+    // Not relative(): git names the root by its long, real path, the file may come by a short name (C:\Users\RUNNER~1).
+    const path = relativeTo(root, absolute);
+    if (!path) throw new Failure(`${file} is not in the repository at ${root}.`);
     if (!rev && !existsSync(absolute)) throw new Failure(`${file} does not exist. To blame it as it was in a commit, give --rev=<commit>.`);
 
     return { root, path };

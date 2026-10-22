@@ -300,5 +300,16 @@
             "SIGNED_URL",
             "SIGNED_URL"
         ]
+    },
+    {
+        "name": "ips at the end of a sentence",
+        "text_base64": "VGhlIGJveCBtb3ZlZCB0byAyMDMuMC4xMTMuNDIuIFRoZW4gMTk4LjUxLjEwMC43LCB0aGVuIDE5Mi4wLjIuMTUgbm93LiBMb2NhbCAxMC4wLjAuNy4gVmVyc2lvbnMgMS4yLjMuNC41IGFuZCAxMC4wLjAuMS4yIHN0YXkuIExhc3QgaG9wIDIwMy4wLjExMy45OQ==",
+        "redacted_base64": "VGhlIGJveCBtb3ZlZCB0byBbUkVEQUNURUQ6SVBfQUREUkVTU10uIFRoZW4gW1JFREFDVEVEOklQX0FERFJFU1NdLCB0aGVuIFtSRURBQ1RFRDpJUF9BRERSRVNTXSBub3cuIExvY2FsIDEwLjAuMC43LiBWZXJzaW9ucyAxLjIuMy40LjUgYW5kIDEwLjAuMC4xLjIgc3RheS4gTGFzdCBob3AgW1JFREFDVEVEOklQX0FERFJFU1Nd",
+        "types": [
+            "IP_ADDRESS",
+            "IP_ADDRESS",
+            "IP_ADDRESS",
+            "IP_ADDRESS"
+        ]
     }
 ]

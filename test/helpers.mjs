@@ -73,6 +73,8 @@ export function makeRepo(remote = 'git@github.com:mara/shop.git') {
     }).toString().trim();
 
     run(['init', '-q', '-b', 'main']);
+    // A global core.autocrlf=true (common on Windows) makes every later `git add` in a test warn on stderr.
+    run(['config', 'core.autocrlf', 'false']);
     if (remote) run(['remote', 'add', 'origin', remote]);
     const hashes = [];
     for (const [i, date] of ['2026-09-01T09:00:00Z', '2026-09-01T10:10:00Z', '2026-09-01T10:40:00Z'].entries()) {

@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/privacyScan.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:6c21ebe3c68bb9dc2fcd2e139ed0e48e454ec56c9d0c201888204aa3c200d60f
+// sha256:7d59634310ec6f78ef1b91c554d3eadabcc9cae5617a83ffa8356c2f041f921e
 
 /**
  * The privacy check that runs where the session lives (plan: local-first privacy, stage 2): in the browser before an
@@ -38,7 +38,7 @@ const RULES = [
     { type: 'SECRET_ASSIGNMENT', pattern: /\b[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|AUTH_KEY)[A-Z0-9_]*["']?\s*[:=]\s*["']?([^\s"'#,;]{8,})/g, group: 1 },
     // The user part of scheme://user@host is not an address: the first branch takes it whole and it is left as it is.
     { type: 'EMAIL', pattern: /(\b[a-z][a-z0-9+.-]*:\/\/[^\s@/"']*@)|\b[A-Za-z0-9._%+-]+@(?!(?:example|test|localhost)\.)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b/g, severity: 'warning', skip: 1 },
-    { type: 'IP_ADDRESS', pattern: /\b(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])\b/g, severity: 'warning' },
+    { type: 'IP_ADDRESS', pattern: /\b(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?!\d|\.\d)\b/g, severity: 'warning' },
     // A company's own network: an address in a URL or after user@, or anything under .corp / .intranet.
     { type: 'INTERNAL_HOST', pattern: /(?<=:\/\/|@)(?:[A-Za-z0-9-]+\.)+(?:internal|corp|intranet|lan|local|localdomain)\b|\b(?:[A-Za-z0-9-]+\.)+(?:corp|intranet|svc\.cluster\.local)\b/g, severity: 'warning' },
 ];
