@@ -3,21 +3,27 @@
 // passed 2 MiB (021287d, 2.09 MiB: "Files in the repository the scanner won't accept"; every version up to 1.94 MiB
 // passed), so the total is kept under 1.9 MiB to hear of it here first. Files over 256 KiB that are not images or fonts,
 // and more than 512 files, hold a version for a reviewer.
+//
+// Measured as git keeps the files (the index's blobs), which is what GitHub serves the scanner: a Windows checkout turns
+// the line ends to CRLF, and the files on its disk come out some 28 KiB larger than the repository is.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { statSync } from 'node:fs';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 let files = null;
 try {
-    files = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(Boolean);
+    // "<mode> <blob> <stage>\t<path>" for each file.
+    files = execFileSync('git', ['ls-files', '-s', '-z'], { cwd: ROOT, encoding: 'utf8' }).split('\0').filter(Boolean)
+        .map((entry) => ({ blob: entry.split(' ')[1], file: entry.slice(entry.indexOf('\t') + 1) }));
 } catch {
     // Not a git checkout (an installed copy of the plugin): nothing to measure.
 }
-const sizes = (files ?? []).map((file) => ({ file, size: statSync(join(ROOT, file)).size }));
+const blobSizes = files?.length
+    ? execFileSync('git', ['cat-file', '--batch-check=%(objectsize)'], { cwd: ROOT, encoding: 'utf8', input: files.map((f) => f.blob).join('\n') + '\n' }).trim().split('\n').map(Number)
+    : [];
+const sizes = (files ?? []).map(({ file }, i) => ({ file, size: blobSizes[i] }));
 const skip = !files && 'not a git checkout';
 
 test('the plugin folder stays well under the 2 MiB the directory scanner fetches', { skip }, () => {
