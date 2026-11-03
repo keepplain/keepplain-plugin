@@ -48,6 +48,20 @@ export function originUrl(cwd) {
     return cwd ? git(cwd, ['remote', 'get-url', 'origin']) : null;
 }
 
+/**
+ * The repository's GitHub address (normalizeRemote) by its origin; a clone whose remotes are named otherwise (no
+ * origin) by the one of them on GitHub. Null when the origin is elsewhere, or there is no origin and not one GitHub
+ * remote but several or none.
+ */
+export function githubRemote(cwd) {
+    if (!cwd) return null;
+    const origin = originUrl(cwd);
+    if (origin !== null) return normalizeRemote(origin);
+    const remotes = new Set((git(cwd, ['remote', '-v']) ?? '').split('\n').map((line) => normalizeRemote(line.split(/\s+/)[1])).filter(Boolean));
+
+    return remotes.size === 1 ? [...remotes][0] : null;
+}
+
 /** The top folder of the repository $cwd is in, or null. */
 export function repositoryRoot(cwd) {
     return cwd ? git(cwd, ['rev-parse', '--show-toplevel']) : null;
@@ -112,7 +126,7 @@ export function projectOf(cwd) {
         const origin = git(dir, ['remote', 'get-url', 'origin']);
         const identity = remoteIdentity(origin);
 
-        return { key: sha256(identity ? `remote:${identity}` : `path:${pathKey(root)}`), name: folderName(root), root: resolve(root), remote: normalizeRemote(origin) };
+        return { key: sha256(identity ? `remote:${identity}` : `path:${pathKey(root)}`), name: folderName(root), root: resolve(root), remote: origin === null ? githubRemote(dir) : normalizeRemote(origin) };
     }
     const root = cwd.match(WORKTREE)?.[1] ?? cwd;
     if (scratch(root)) return null;
@@ -256,7 +270,7 @@ export function gitContext(cwd, headStart, startedAt, past = null, own = null) {
 
     const branch = past?.branch ?? git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const context = {
-        remote: normalizeRemote(git(cwd, ['remote', 'get-url', 'origin'])),
+        remote: githubRemote(cwd),
         branch: branch && branch !== 'HEAD' ? branch : null,
         head_start: headStart,
         head_end: headEnd,

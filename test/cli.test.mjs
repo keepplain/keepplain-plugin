@@ -1,6 +1,6 @@
 // preview → send → whoami against a stand-in for the KeepPlain API, with a throwaway Claude Code config folder.
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { createServer, request as forward } from 'node:http';
 import { createHash } from 'node:crypto';
@@ -85,8 +85,11 @@ const server = createServer((req, res) => {
     req.on('end', () => {
         const base = `http://127.0.0.1:${server.address().port}`;
         const links = { build_slug: 'draft-x', edit_url: `${base}/b/draft-x/edit`, status_url: `${base}/api/v1/imports/imp1` };
-        if (req.method === 'GET' && req.url === '/api/v1/me') {
-            return reply(200, { username: 'mara', token: { name: 'laptop' }, teams: [{ slug: 'acme', name: 'Acme', github_owners: ['acme-inc'], auto_capture: true }] });
+        if (req.method === 'GET' && req.url.split('?')[0] === '/api/v1/me') {
+            // Asked about a repository, the site names its team, also under a name it had before a move (old-acme).
+            const remote = new URL(req.url, base).searchParams.get('remote');
+            const named = remote === null ? {} : { repository_team: /github\.com\/(acme-inc|old-acme)\//i.test(remote) ? 'acme' : null };
+            return reply(200, { username: 'mara', token: { name: 'laptop' }, teams: [{ slug: 'acme', name: 'Acme', github_owners: ['acme-inc'], auto_capture: true }], ...named });
         }
         if (req.method === 'POST' && req.url === '/api/v1/imports') {
             if (importsDown) return reply(503, { error: { code: 'unavailable', message: 'KeepPlain is down for maintenance.' } });
@@ -650,6 +653,19 @@ test('auto mode is off until the person turns it on, and then sends a session th
     assert.equal(autoLog().split('\n').filter((l) => l.includes(`${id} skipped: not a repository`)).length, said);
     await cli(['auto-send', 'a1b2c3d4-0000-4000-8000-000000000002']);
     assert.match(received.toString('latin1'), /name="space"\r\n\r\nacme/);
+    // A clone made before the repository moved, and one whose only GitHub remote is not called origin: still the team's.
+    const moved = makeRepo('git@github.com:old-acme/billing.git');
+    const unnamed = makeRepo(null);
+    execFileSync('git', ['remote', 'add', 'github', 'https://github.com/acme-inc/tools.git'], { cwd: unnamed.dir, stdio: 'ignore' });
+    execFileSync('git', ['remote', 'add', 'vm', 'ssh://root@10.0.0.1/srv/tools.git'], { cwd: unnamed.dir, stdio: 'ignore' });
+    for (const [n, repo] of [[3, moved], [4, unnamed]]) {
+        const other = `a1b2c3d4-0000-4000-8000-00000000000${n}`;
+        copyFileSync(transcript, join(home, 'projects', 'C--code-shop', `${other}.jsonl`));
+        writeFileSync(join(home, 'ct', 'sessions', `${other}.json`), JSON.stringify({ session_id: other, cwd: repo.dir, head: repo.hashes[0] }));
+        received = null;
+        await cli(['auto-send', other]);
+        assert.match(received?.toString('latin1') ?? '', /name="space"\r\n\r\nacme/, `session ${n}`);
+    }
 
     assert.match((await cli(['auto', 'sometimes'])).out, /Use \/keepplain:auto on/);
     // Codex has its own switch: turning Claude Code's off leaves it on, and the other way round.

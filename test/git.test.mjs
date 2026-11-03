@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { folderGitContexts, gitContext, MAX_COMMIT_FILES, MAX_SHAS, MAX_SUBJECTS, normalizeRemote, parseShortstat, projectOf, remoteIdentity, worktrees } from '../scripts/lib/git.mjs';
+import { folderGitContexts, gitContext, MAX_COMMIT_FILES, MAX_SHAS, MAX_SUBJECTS, githubRemote, normalizeRemote, parseShortstat, projectOf, remoteIdentity, worktrees } from '../scripts/lib/git.mjs';
 import { readSidecar } from '../scripts/lib/sidecar.mjs';
 import { hookCommand, makeRepo } from './helpers.mjs';
 
@@ -150,6 +150,26 @@ test('without a remote the root path is the key; outside git the folder; temp fo
     assert.equal(projectOf(plain), null);
     assert.equal(projectOf(tmpdir()), null);
     assert.equal(projectOf(null), null);
+});
+
+test('without an origin the one GitHub remote is the repository, whatever its name', () => {
+    const { dir } = makeRepo(null);
+    const add = (name, url) => execFileSync('git', ['remote', 'add', name, url], { cwd: dir, stdio: 'ignore' });
+    const key = projectOf(dir).key;
+    assert.equal(githubRemote(dir), null);
+    add('github', 'git@github.com:Mara/Shop.git');
+    add('vm', 'ssh://root@10.0.0.1/srv/shop.git');
+    assert.equal(githubRemote(dir), 'https://github.com/Mara/Shop');
+    assert.equal(projectOf(dir).remote, 'https://github.com/Mara/Shop');
+    // The key stays the path's, as before: the sessions already sent from the folder stay its project.
+    assert.equal(projectOf(dir).key, key);
+    // Two GitHub remotes and no origin: which is the repository is not for the plugin to guess.
+    add('fork', 'https://github.com/someone/shop');
+    assert.equal(githubRemote(dir), null);
+    // An origin elsewhere is the repository, even with a GitHub remote beside it.
+    const other = makeRepo('git@gitlab.com:mara/shop.git');
+    execFileSync('git', ['remote', 'add', 'github', 'https://github.com/mara/shop'], { cwd: other.dir, stdio: 'ignore' });
+    assert.equal(githubRemote(other.dir), null);
 });
 
 test('outside a repository there is no git context', () => {

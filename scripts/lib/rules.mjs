@@ -20,7 +20,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { home, writePrivate } from './credentials.mjs';
-import { normalizeRemote, originUrl } from './git.mjs';
+import { githubRemote } from './git.mjs';
 import { readUses } from './playbooks.mjs';
 import { matchRules } from './rule-match.mjs';
 import { detectStacks } from './stacks.mjs';
@@ -74,7 +74,7 @@ export function setRulesOn(site, on, dir = home()) {
 
 /** The repository's GitHub owner (lower case), or null for any other host. */
 export function githubOwner(root) {
-    const remote = normalizeRemote(originUrl(root));
+    const remote = githubRemote(root);
 
     return remote ? remote.split('/')[3].toLowerCase() : null;
 }

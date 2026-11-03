@@ -1829,14 +1829,20 @@ async function autoSend(id, { final = true, caughtUp = false, push = false, past
 
     let space = null;
     if (mode === 'team') {
-        let teams;
+        const remote = session.git?.remote ?? null;
+        let me;
         try {
-            teams = (await api('GET', '/api/v1/me', undefined, true, 15000)).teams ?? [];
+            me = await api('GET', `/api/v1/me${remote ? `?remote=${encodeURIComponent(remote)}` : ''}`, undefined, true, 15000);
         } catch (e) {
             return giveUp(`failed: ${e.message}`);
         }
-        const owner = session.git?.remote?.match(/^https:\/\/github\.com\/([^/]+)\//)?.[1]?.toLowerCase();
-        const asking = owner ? teams.filter((t) => t.auto_capture && (t.github_owners ?? []).includes(owner)) : [];
+        const teams = me.teams ?? [];
+        const owner = remote?.match(/^https:\/\/github\.com\/([^/]+)\//)?.[1]?.toLowerCase();
+        // The site says whose repository it is (repository_team), knowing the names a renamed or moved one had, which a
+        // clone made before keeps; a site from before that answers without it, and the owner alone decides.
+        const asking = remote && 'repository_team' in me
+            ? teams.filter((t) => t.auto_capture && t.slug === me.repository_team)
+            : owner ? teams.filter((t) => t.auto_capture && (t.github_owners ?? []).includes(owner)) : [];
         if (asking.length !== 1) {
             return hold(session.session.bytes, 'not a team repository', 'skipped: not a repository of a team that asks for automatic sending (looked at again when the session grows)');
         }
