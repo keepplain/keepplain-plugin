@@ -1,21 +1,40 @@
-# KeepPlain for Claude Code, Codex, Cursor and Pi
+# KeepPlain
 
-Send the Claude Code, Codex, Cursor or Pi session you are in to [KeepPlain](https://keepplain.com) as a draft Build: the prompts, interventions and fails that mattered, with the raw log one layer down. The plugin never publishes. The draft is private: only you see it, or your team when the session ran in one of the team's repositories. You review every moment on the site and publish it there if you want to.
+Your coding agent forgets everything when a session ends. [KeepPlain](https://keepplain.com) keeps that history, so you stop explaining the same thing twice.
 
-The other way round, the plugin gives your agent the KeepPlain library: before a non-trivial task, or after a few failed attempts, it can look up sessions where other developers did something similar, and what went wrong for them (see [The library in your agent](#the-library-in-your-agent)). And `/keepplain:use` puts a published Build's playbook, what that session learned the hard way, into your repository as a skill or a rule (see [Playbooks](#playbooks)).
+Works with Claude Code, Codex, Cursor, Pi and Antigravity. Free for personal use, teams pay per seat.
+
+```
+curl -fsSL https://keepplain.com/install.sh | sh    # macOS and Linux
+irm https://keepplain.com/install.ps1 | iex         # Windows, in PowerShell
+keepplain login
+keepplain enable
+```
+
+One file, no Node.js, no sudo. `enable` says what it found and asks before it changes anything. [More ways to install](#install)
+
+## What it does
+
+**Find what you already solved.** Your agent searches the sessions you sent to KeepPlain and opens the turn with the answer. `/keepplain:resume` picks a task up in another agent.
+
+**Stop correcting it twice.** Once a day a model reads your sessions and suggests the mistakes that came back in two conversations or more. Add one in a click and your agents get it at the start of a session or with the prompt it matters for. [Rules](#rules-in-every-session)
+
+**Keep going at the limit.** Past 90% of Claude's 5-hour or weekly limit, you get a button to continue in Codex or Pi. The brief is built on your computer without a model, and it needs no sign-in. [Handoff](#continue-in-another-agent)
+
+**See which session wrote a line.** `keepplain blame <file>` is `git blame` with the agent session behind each line. [Blame](#who-wrote-each-line)
+
+```
+● Claude Code · Harden the webhook   4 │ const TOLERANCE_SEC = 300;
+○ Pi · Seat count sync              19 │ await syncSeats(event.data, { lock: 'team' });
+● Codex · maya, private             22 │ await markPaid(event.data.id, { notify: true });
+  no session found                  25 │ return new Response('ok');
+```
+
+**Learn from other people's sessions.** Before a hard task, or when it's stuck, your agent can check the public library for how others got past the same problem. [Library](#the-library-in-your-agent)
+
+**What leaves your computer.** Sessions are sent only when you run `/keepplain:build` and confirm, or after you turn on auto mode. They are stored on keepplain.com as private drafts, and nothing is public until you publish it on the site. Secrets are replaced on your computer before anything is sent. That check works by patterns and can miss things, so read the preview. This plugin is MIT, the site is not open source. [The full list](#what-leaves-your-machine)
 
 ## Install
-
-### Coming from Coders Talk
-
-KeepPlain was called Coders Talk until October 2026, and the plugin does not take the old one over: take it off first, or its hooks run next to the new ones.
-
-1. `coders-talk disable` takes it out of Claude Code, Codex, Cursor and Pi.
-2. Delete `~/.coders-talk` and the `# Coders Talk CLI` line in your shell profile (on Windows, `%USERPROFILE%\.coders-talk\bin` in your PATH).
-3. If you added Coders Talk from Claude's plugin directory, remove it in Customize → Plugins; the Coders Talk desktop app, in Settings → Apps.
-4. The new plugin leaves the old blocks alone: delete `<!-- coders-talk:… -->` blocks in CLAUDE.md or AGENTS.md and `# >>> coders-talk` blocks in git hooks.
-
-Then install as below and sign in again with `/keepplain:login` (or `keepplain login`).
 
 ### From a terminal
 
@@ -108,7 +127,22 @@ The skill is built by `node scripts/skill.mjs` (dist/keepplain-skill.zip: its SK
 
 The proxy of a cloud machine looks inside TLS with its own CA. The plugin trusts it from `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, the system store (Node 22.15 and newer) or `~/.ccr/ca-bundle.crt`, where Claude Code on the web keeps it, on top of Node's own CAs and `NODE_EXTRA_CA_CERTS`. Where KeepPlain itself is refused by a proxy, the plugin says so and, in Claude Code on the web, which environment setting lets it through.
 
+### Coming from Coders Talk
+
+KeepPlain was called Coders Talk until October 2026, and the plugin does not take the old one over: take it off first, or its hooks run next to the new ones.
+
+1. `coders-talk disable` takes it out of Claude Code, Codex, Cursor and Pi.
+2. Delete `~/.coders-talk` and the `# Coders Talk CLI` line in your shell profile (on Windows, `%USERPROFILE%\.coders-talk\bin` in your PATH).
+3. If you added Coders Talk from Claude's plugin directory, remove it in Customize → Plugins; the Coders Talk desktop app, in Settings → Apps.
+4. The new plugin leaves the old blocks alone: delete `<!-- coders-talk:… -->` blocks in CLAUDE.md or AGENTS.md and `# >>> coders-talk` blocks in git hooks.
+
+Then install as above and sign in again with `/keepplain:login` (or `keepplain login`).
+
 ## Use
+
+Send the Claude Code, Codex, Cursor or Pi session you are in to [KeepPlain](https://keepplain.com) as a draft Build: the prompts, interventions and fails that mattered, with the raw log one layer down. The plugin never publishes. The draft is private: only you see it, or your team when the session ran in one of the team's repositories. You review every moment on the site and publish it there if you want to.
+
+The other way round, the plugin gives your agent the KeepPlain library: before a non-trivial task, or after a few failed attempts, it can look up sessions where other developers did something similar, and what went wrong for them (see [The library in your agent](#the-library-in-your-agent)). And `/keepplain:use` puts a published Build's playbook, what that session learned the hard way, into your repository as a skill or a rule (see [Playbooks](#playbooks)).
 
 The commands are the same in every agent, typed its way: `/keepplain:build` in Claude Code and Pi, `$keepplain:build` in Codex, `/keepplain-build` in Cursor. The tables below use the first.
 
