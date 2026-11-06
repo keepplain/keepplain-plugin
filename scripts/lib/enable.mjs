@@ -11,8 +11,9 @@
  *   - the plugin from the GitHub marketplace (keepplain@keepplain) is replaced, or its hooks and snapshots would
  *     run twice; for Pi, the git package of the README;
  *   - the plugin from Claude's plugin directory (keepplain@synced, added on claude.ai) is left as it is: it has no
- *     install record to uninstall, and the person chose it. Claude Code then gets no copy of ours, and any other copy
- *     goes, so the hooks run once;
+ *     install record to uninstall, and the person chose it. That copy has no hooks (scripts/directory.mjs): alone,
+ *     Claude Code gets no copy of ours next to it and the person is told what it lacks; next to one with hooks, that one
+ *     stays too, and the person is told to take the directory's off, which only claude.ai can do;
  *   - a KeepPlain MCP server added by hand is removed, or kept and the plugin brings none to that agent;
  *   - auto mode is one question for every agent found (--auto=off|on|team|push), off unless the person says otherwise.
  *     Codex's trust in the hooks stays Codex's: one line says where to give it;
@@ -49,6 +50,8 @@ const MCP_KEY = { 'claude-code': 'claude', codex: 'codex', cursor: 'cursor' };
 /** What Claude Code calls a plugin added from Claude's plugin directory on claude.ai: keepplain@synced. */
 const SYNCED = 'synced';
 const DIRECTORY = "KeepPlain from Claude's plugin directory";
+/** What that copy lacks: it has no hooks, so whatever they do does not happen in that agent. */
+const DIRECTORY_LACKS = 'no auto mode, rules, git snapshots or handoff offer';
 /** An agent the plugin can be put into from here: it has a command that installs it, or its files are all it takes. */
 const installable = (agent) => Boolean(agent.cli || agent.native);
 /** The command line Cursor runs a hook with (through PowerShell on Windows). */
@@ -94,10 +97,11 @@ export async function enable({ site, version, interactive, flags, json = false, 
             const plugins = installedPlugins(agent);
             const synced = plugins.find((p) => p.marketplace === SYNCED);
             const ours = plugins.find((p) => p.marketplace === MARKETPLACE);
-            // Next to the directory's copy, ours is one more copy too.
-            const others = plugins.filter((p) => p !== synced && (synced || p !== ours));
+            const others = plugins.filter((p) => p !== synced && p !== ours);
 
-            return { agent, plugins, synced, ours: synced ? undefined : ours, others, servers: manualMcpServers(agent, site) };
+            // Alone, the directory's copy is what the person chose: no second copy of the same commands next to it. Next
+            // to a copy with hooks it is no reason to take that copy away: those hooks run nowhere else.
+            return { agent, plugins, synced, directoryOnly: Boolean(synced && !ours && !others.length), ours, others, servers: manualMcpServers(agent, site) };
         });
         log(`keepplain ${version} (${selfProgram().join(' ')})`);
         log('Found:');
@@ -111,9 +115,7 @@ export async function enable({ site, version, interactive, flags, json = false, 
         // The questions.
         for (const s of state) {
             if (!s.others.length || !installable(s.agent)) continue;
-            const question = s.synced
-                ? `${s.agent.name} has ${DIRECTORY} (${s.synced.id}) and ${s.others.map((p) => p.id).join(', ')}; their hooks run twice. Uninstall ${s.others.map((p) => p.id).join(', ')}? [Y/n]`
-                : `${s.agent.name} has ${s.others.map((p) => p.id).join(', ')} installed; its hooks would run twice next to this one. Replace it? [Y/n]`;
+            const question = `${s.agent.name} has ${s.others.map((p) => p.id).join(', ')} installed; its hooks would run twice next to this one. Replace it? [Y/n]`;
             s.replace = (await ask(question, 'y')).startsWith('y');
         }
         const withServers = state.filter((s) => s.servers.length && installable(s.agent));
@@ -169,14 +171,12 @@ export async function enable({ site, version, interactive, flags, json = false, 
         }
 
         // The plan, then the go-ahead.
-        const installing = state.filter((s) => installable(s.agent) && !s.synced && (!s.others.length || s.replace));
+        const installing = state.filter((s) => installable(s.agent) && !s.directoryOnly && (!s.others.length || s.replace));
         const plan = [`Lay out the plugin ${version} in ${pluginDir()}`];
         for (const s of state) {
             if (!installable(s.agent)) plan.push(`${s.agent.name}: its command is not in PATH, so install the plugin from inside it (printed at the end)`);
-            else if (s.synced) {
-                plan.push(`${s.agent.name}: keep ${DIRECTORY} (${s.synced.id}), no copy of ours`);
-                if (s.replace) plan.push(`${s.agent.name}: uninstall ${s.others.map((p) => p.id).join(', ')}`);
-            } else if (s.others.length && !s.replace) plan.push(`${s.agent.name}: leave it as it is (it keeps ${s.others.map((p) => p.id).join(', ')})`);
+            else if (s.directoryOnly) plan.push(`${s.agent.name}: keep ${DIRECTORY} (${s.synced.id}), no copy of ours`);
+            else if (s.others.length && !s.replace) plan.push(`${s.agent.name}: leave it as it is (it keeps ${s.others.map((p) => p.id).join(', ')})`);
             else {
                 if (s.replace) plan.push(`${s.agent.name}: uninstall ${s.others.map((p) => p.id).join(', ')}`);
                 if (s.servers.length && mcp === 'remove') plan.push(`${s.agent.name}: remove the MCP server ${s.servers.map(describeServer).join(', ')}`);
@@ -221,7 +221,6 @@ export async function enable({ site, version, interactive, flags, json = false, 
                 return false;
             }
         };
-        for (const s of state.filter((x) => x.synced && x.replace)) attempt(s.agent, `${s.agent.name}: uninstall ${s.others.map((p) => p.id).join(', ')}`, () => s.others.forEach((p) => removeOther(s.agent, p)));
         for (const s of state) {
             if (!installing.includes(s)) continue;
             const { agent } = s;
@@ -253,7 +252,9 @@ export async function enable({ site, version, interactive, flags, json = false, 
         log('');
         for (const agent of done) say(installedLine(agent, version));
         for (const s of state.filter((x) => x.synced && installable(x.agent))) {
-            say(`${s.agent.name}: ${DIRECTORY} stays; it runs its scripts with Node.js 20 or newer.${s.others.length && !s.replace ? ` ${s.others.map((p) => p.id).join(', ')} stays too, so the hooks run twice.` : ''}`);
+            say(s.directoryOnly
+                ? `${s.agent.name}: ${DIRECTORY} stays. That copy has no hooks: ${DIRECTORY_LACKS} in ${s.agent.name}, whatever auto mode says here. To have them, remove it on claude.ai, in Customize → Plugins, and run keepplain enable again.`
+                : `${s.agent.name}: ${DIRECTORY} is here too, with the same commands. Remove it on claude.ai, in Customize → Plugins.`);
         }
         for (const note of notes) say(note);
         for (const s of state.filter((x) => !installable(x.agent))) say(manualSteps(s.agent));
@@ -402,7 +403,10 @@ export function status({ site, version }) {
         }
         if (ours && agent.id === 'cursor') notes.push(`hooks ${ours.hooks ? 'in ~/.cursor/hooks.json' : 'missing (keepplain enable)'}, ${ours.skills.length} of ${CURSOR_SKILLS.length} skills`);
         if (ours && agent.id === 'antigravity') notes.push(`hooks ${ours.hooks ? 'in ~/.gemini/config/hooks.json' : 'missing (keepplain enable)'}, ${ours.skills.length} of ${ANTIGRAVITY_SKILLS.length} skills`);
-        if (plugins.length > 1) notes.push('two KeepPlain plugins: their hooks run twice (keepplain enable keeps one)');
+        const withHooks = plugins.filter((p) => p.marketplace !== SYNCED);
+        if (withHooks.length > 1) notes.push('two KeepPlain plugins: their hooks run twice (keepplain enable keeps one)');
+        if (withHooks.length && withHooks.length < plugins.length) notes.push("the directory's copy repeats the same commands: remove it on claude.ai, in Customize → Plugins");
+        else if (plugins.length && !withHooks.length) notes.push(`that copy has no hooks: ${DIRECTORY_LACKS} here`);
         const servers = manualMcpServers(agent, site);
         if (servers.length) notes.push(`MCP server ${agent.id === 'cursor' ? 'in ~/.cursor/mcp.json' : 'added by hand'}: ${servers.map(describeServer).join(', ')}`);
         notes.push(`auto mode ${autoName(autoMode(site, agent.id))}`);
@@ -430,10 +434,11 @@ export function agentStatus({ site, version }) {
         const servers = manualMcpServers(agent, site);
         const notes = [];
         if (!installable(agent)) notes.push(`Its command is not in PATH, so its plugins cannot be listed or installed from here. ${manualSteps(agent)}`);
-        if (plugins.length > 1) notes.push('Two KeepPlain plugins: their hooks run twice. Connecting it again keeps one.');
+        const withHooks = plugins.filter((p) => p.marketplace !== SYNCED);
+        if (withHooks.length > 1) notes.push('Two KeepPlain plugins: their hooks run twice. Connecting it again keeps one.');
         if (ours && agent.id === 'cursor' && !ours.hooks) notes.push('Its hooks are missing from ~/.cursor/hooks.json: connect it again.');
         if (ours && agent.id === 'antigravity' && !ours.hooks) notes.push('Its hooks are missing from ~/.gemini/config/hooks.json: connect it again.');
-        if (plugins.some((p) => p.marketplace === SYNCED)) notes.push(`${DIRECTORY}: remove it on claude.ai, in Customize → Plugins.`);
+        if (plugins.some((p) => p.marketplace === SYNCED)) notes.push(`${DIRECTORY}${withHooks.length ? ' repeats the same commands' : ` has no hooks: ${DIRECTORY_LACKS} here`}. Remove it on claude.ai, in Customize → Plugins${withHooks.length ? '' : ', then connect it here'}.`);
         else if (plugins.length && !ours) notes.push(`Installed from elsewhere (${plugins.map((p) => p.id).join(', ')}): connecting it here replaces it.`);
 
         return {

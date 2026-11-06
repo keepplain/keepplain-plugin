@@ -1,0 +1,32 @@
+name: Directory
+
+# Each release puts the copy of the plugin for Claude's plugin directory on the branch `directory`, which the directory
+# reads (scripts/directory.mjs): the skills and the program, without hooks, a mod or a header helper. The rest of the
+# repository, and the plugin the GitHub marketplace and `keepplain enable` give people, stay as they are.
+on:
+  push:
+    tags: ['keepplain--v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  directory:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: node --import ./test/isolate.mjs --test test/directory.test.mjs
+      - name: Commit the copy to the branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          # The first run finds no branch: its first commit has no parent.
+          git fetch --depth=1 origin +refs/heads/directory:refs/heads/directory || true
+          node scripts/directory.mjs --commit
+      - run: git push origin refs/heads/directory:refs/heads/directory

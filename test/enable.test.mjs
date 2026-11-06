@@ -124,29 +124,44 @@ test('the plugin from GitHub is replaced, and a server added by hand removed or 
     assert.ok(existsSync(join(plugin(), '.mcp.json')), 'the plugin brings its own now');
 });
 
-test("the plugin from Claude's plugin directory stays: no copy of ours next to it, and another copy goes", async () => {
+test("next to a copy with hooks, the plugin from Claude's plugin directory is told to go: it has none, so that copy stays", async () => {
     writeFileSync(join(dir, 'state.json'), JSON.stringify({ claude: { plugins: { 'keepplain@synced': '0.14.4', 'keepplain@keepplain-local': '0.14.3' }, marketplaces: { 'keepplain-local': '/x' }, mcp: [] } }));
 
     const status = await cli(['status']);
     assert.match(status.out, /keepplain@synced 0\.14\.4 \(from Claude's plugin directory\)/);
-    assert.match(status.out, /two KeepPlain plugins: their hooks run twice \(keepplain enable keeps one\)/);
+    assert.match(status.out, /the directory's copy repeats the same commands: remove it on claude\.ai/);
+    assert.doesNotMatch(status.out, /their hooks run twice/, 'only one of the two has hooks');
 
     const r = await cli(['enable', '--yes']);
     assert.equal(r.ok, true, r.out);
-    assert.match(r.out, /- Claude Code: keep KeepPlain from Claude's plugin directory \(keepplain@synced\), no copy of ours/);
-    assert.match(r.out, /- Claude Code: uninstall keepplain@keepplain-local\n/);
-    assert.match(r.out, /Claude Code: KeepPlain from Claude's plugin directory stays; it runs its scripts with Node\.js 20 or newer\./);
-    assert.deepEqual(Object.keys(agentState().claude.plugins), ['keepplain@synced']);
+    assert.doesNotMatch(r.out, /uninstall keepplain@keepplain-local/);
+    assert.match(r.out, /Claude Code: KeepPlain from Claude's plugin directory is here too, with the same commands\. Remove it on claude\.ai, in Customize → Plugins\./);
+    assert.deepEqual(Object.keys(agentState().claude.plugins).sort(), ['keepplain@keepplain-local', 'keepplain@synced']);
     assert.deepEqual(Object.keys(agentState().codex.plugins), ['keepplain@keepplain-local'], 'the other agents as always');
     const claude = calls().filter((c) => c.agent === 'claude').map((c) => c.args.join(' '));
     assert.ok(!claude.some((c) => c.includes('@synced') && !c.startsWith('plugin list')), claude.join('\n'));
-    assert.ok(!claude.some((c) => c.startsWith('plugin install') || c.startsWith('plugin update')), claude.join('\n'));
 
     // Disable takes off what is ours and says where the directory's copy goes.
     const off = await cli(['disable', '--yes']);
     assert.equal(off.ok, true, off.out);
     assert.match(off.out, /Claude Code: KeepPlain from Claude's plugin directory stays; remove it on claude\.ai, in Customize → Plugins\./);
     assert.deepEqual(Object.keys(agentState().claude.plugins), ['keepplain@synced']);
+});
+
+test("alone, the plugin from Claude's plugin directory stays, and enable says what a copy without hooks lacks", async () => {
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ claude: { plugins: { 'keepplain@synced': '0.14.4' }, marketplaces: {}, mcp: [] } }));
+
+    const status = await cli(['status']);
+    assert.match(status.out, /that copy has no hooks: no auto mode, rules, git snapshots or handoff offer here/);
+
+    const r = await cli(['enable', '--yes', '--auto=on', '--agent=claude-code']);
+    assert.equal(r.ok, true, r.out);
+    assert.match(r.out, /- Claude Code: keep KeepPlain from Claude's plugin directory \(keepplain@synced\), no copy of ours/);
+    assert.match(r.out, /That copy has no hooks: no auto mode, rules, git snapshots or handoff offer in Claude Code, whatever auto mode says here\. To have them, remove it on claude\.ai, in Customize → Plugins, and run keepplain enable again\./);
+    assert.deepEqual(Object.keys(agentState().claude.plugins), ['keepplain@synced']);
+    const claude = calls().filter((c) => c.agent === 'claude').map((c) => c.args.join(' '));
+    assert.ok(!claude.some((c) => c.startsWith('plugin install') || c.startsWith('plugin update')), claude.join('\n'));
+    await cli(['enable', '--yes', '--auto=off', '--agent=claude-code']);
 });
 
 test("the plugin the Claude desktop app brings from the directory is found in its own folder, and no copy of ours goes next to it", async () => {

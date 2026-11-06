@@ -24,6 +24,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cmdCommand, psCommand, shCommand } from './quoting.mjs';
+
+export { cmdCommand, psCommand, shCommand };
 
 export const MARKETPLACE = 'keepplain-local';
 export const PLUGIN_ID = `keepplain@${MARKETPLACE}`;
@@ -50,13 +53,6 @@ export function readSources(root) {
 
     return files;
 }
-
-/** Single-quoted for sh and Git Bash: nothing inside is special. */
-export const shCommand = (parts) => parts.map((p) => `'${p.replace(/'/g, `'\\''`)}'`).join(' ');
-/** PowerShell: the call operator, then single-quoted words. */
-export const psCommand = (parts) => `& ${parts.map((p) => `'${p.replace(/'/g, "''")}'`).join(' ')}`;
-/** cmd.exe: double quotes; a Windows path holds none. */
-export const cmdCommand = (parts) => parts.map((p) => (/[\s&^|<>()"]/.test(p) ? `"${p}"` : p)).join(' ');
 
 /**
  * The command line of an Antigravity hook: $program (the file, or node and the script) with $args. On Windows Antigravity

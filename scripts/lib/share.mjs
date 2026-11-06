@@ -19,9 +19,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { findProgram } from './agents.mjs';
+import { findProgram } from './detect.mjs';
 import { home, writePrivate } from './credentials.mjs';
-import { cmdCommand } from './plugin.mjs';
+import { cmdCommand } from './quoting.mjs';
 
 /** A repository is checked at most this often while auto mode is on. */
 export const CHECK_EVERY_MS = 60 * 60_000;

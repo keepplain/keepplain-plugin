@@ -105,12 +105,10 @@ import { siteUrl } from './lib/config.mjs';
 import { clearPendingLogin, forgetToken, home as credentialsHome, pendingLogin, savedToken, savedUsername, savePendingLogin, saveToken, writePrivate } from './lib/credentials.mjs';
 import { Failure } from './lib/failure.mjs';
 import { fileRepository, folderGitContexts, gitContext, normalizeRemote, projectOf, repositoryRoot, worktrees } from './lib/git.mjs';
-import { agentStatus, disable, enable, refresh, status } from './lib/enable.mjs';
-import { runGitHook } from './lib/githooks.mjs';
 import { AGENT_IDS, AGENTS, agentArgs, agentId, commandIn, hasPluginOptions } from './lib/agent.mjs';
-import { detectAgents, forgetMcpNeedsAuth, installedPlugins } from './lib/agents.mjs';
+import { detectAgents } from './lib/detect.mjs';
+import { EDITION, editionRuns, notInThisCopy } from './lib/edition.mjs';
 import { AGENTS as USE_AGENTS, FORMATS as USE_FORMATS, agentOf, buildSlug, findBlock, lineDiff, projectRoot, readUses, recordUse, ruleTarget, shown, skillName, withBlock, writeText } from './lib/playbooks.mjs';
-import { HOOK_EVENTS, runHook } from './lib/hooks.mjs';
 import { proxyFor, request } from './lib/http.mjs';
 import { describeLibrary, LibraryWatch } from './lib/library.mjs';
 import { nudgeOn, setNudge } from './lib/nudge.mjs';
@@ -132,7 +130,6 @@ import { addedFolders, slimLine } from './lib/slim.mjs';
 import { BINARY_VERSION, selfCommand, selfProgram, version } from './lib/runtime.mjs';
 import { agentOfSession, allSessions, describeSession, folderSessions, lastSent, markSent, sentAt, sentUrl, sessionCwd, sessionPath } from './lib/sessions.mjs';
 import { shellFolders } from './lib/shellfolders.mjs';
-import { removeLeftover, update, updateNotice } from './lib/update.mjs';
 import { changesSince, checkRules, saveRulesState } from './lib/team-rules.mjs';
 import { fetchRules, repositoryFacts, rulesEntry, rulesOn, setRulesOn, summary as rulesSummary } from './lib/rules.mjs';
 import { addNotice, editPullRequest, findPullRequest, ghProblem, markShareChecked, readmeFile, readText, rememberAuto, withPrBlock, withReadmeBlock } from './lib/share.mjs';
@@ -181,11 +178,14 @@ const token = env.KEEPPLAIN_TOKEN || env.CLAUDE_PLUGIN_OPTION_TOKEN || savedToke
 // In a cloud session with no token of its own, the plugin synced from claude.ai goes that way by itself.
 const VIA_CONNECTOR = args.includes('--connector') || Boolean(option('upload')) || (env.CLAUDE_CODE_REMOTE === 'true' && !token && AGENT.id === 'claude-code');
 
-if (BINARY_VERSION) removeLeftover();
+// What sets the agents up or replaces this program (lib/enable.mjs, githooks.mjs, hooks.mjs, update.mjs, agents.mjs) is
+// imported where it is used, not above: the copy in Claude's plugin directory leaves those files out (lib/edition.mjs).
+if (BINARY_VERSION) (await import('./lib/update.mjs')).removeLeftover();
 // Previews nobody sent: gone PREPARED_TTL_MS after they were made, whatever runs next (lib/prepared.mjs).
 sweepPrepared();
 
 try {
+    if (!editionRuns(command)) throw new Failure(notInThisCopy(command));
     // First and alone: it runs at every connection of the MCP server, and must answer with JSON whatever happens.
     if (command === 'mcp-headers') {
         mcpHeaders();
@@ -195,10 +195,11 @@ try {
     // The same for a commit or a push: git waits for these, and nothing here may stop it.
     if (command === 'git-hook') {
         const input = argId === 'pre-push' ? await readAll(process.stdin) : '';
-        runGitHook(argId, positional.slice(2), { site, input });
+        (await import('./lib/githooks.mjs')).runGitHook(argId, positional.slice(2), { site, input });
         process.exit(0);
     }
     if (command === 'hook') {
+        const { HOOK_EVENTS, runHook } = await import('./lib/hooks.mjs');
         if (AGENT_IDS.includes(argId) && HOOK_EVENTS.includes(positional[2])) await runHook(argId, positional[2]);
         process.exit(0);
     }
@@ -222,7 +223,7 @@ try {
     else if (command === 'nudge') nudge(argId);
     else if (command === 'handoff') await handoff(argId);
     else if (command === 'version' || args.includes('--version')) console.log(`keepplain ${VERSION}`);
-    else if (command === 'update') await update(argId, { check: args.includes('--check') });
+    else if (command === 'update') await (await import('./lib/update.mjs')).update(argId, { check: args.includes('--check') });
     else if (command === 'sessions') await sessions();
     else if (command === 'blame') await blame();
     else if (command === 'build') await build(argId);
@@ -231,19 +232,20 @@ try {
     else if (command === 'share-auto') await shareAuto();
     else if (command === 'privacy') await privacyWords(argId);
     else if (command === 'import-past') await importPast(argId);
-    else if (command === 'enable') await enable({ site, version: VERSION, interactive: TERMINAL, flags: setupFlags(), json: JSON_OUT, account: myAccount, signedIn: Boolean(token) });
-    else if (command === 'disable') await disable({ interactive: TERMINAL, flags: setupFlags(), json: JSON_OUT });
+    else if (command === 'enable') await (await import('./lib/enable.mjs')).enable({ site, version: VERSION, interactive: TERMINAL, flags: setupFlags(), json: JSON_OUT, account: myAccount, signedIn: Boolean(token) });
+    else if (command === 'disable') await (await import('./lib/enable.mjs')).disable({ interactive: TERMINAL, flags: setupFlags(), json: JSON_OUT });
     else if (command === 'status') {
-        if (JSON_OUT) emit(statusJson());
+        const { agentStatus, status } = await import('./lib/enable.mjs');
+        if (JSON_OUT) emit(statusJson(agentStatus));
         else status({ site, version: VERSION });
         pruneOwnSnapshots();
     }
     // What `update` runs with the new file: the plugin laid out again, in the new version.
-    else if (command === 'refresh-plugin') refresh({ site, version: VERSION });
+    else if (command === 'refresh-plugin') (await import('./lib/enable.mjs')).refresh({ site, version: VERSION });
     else if (command === 'help' || command === '-h' || args.includes('--help')) console.log(help());
     else throw new Failure(`${command ? `Unknown command "${command}".\n` : ''}${help()}`);
     // Only to a person at a terminal: never into an agent's context, nor from hooks and background runs.
-    if (TERMINAL && command !== 'update') updateNotice(VERSION);
+    if (TERMINAL && command !== 'update' && editionRuns('update')) (await import('./lib/update.mjs')).updateNotice(VERSION);
 } catch (e) {
     const message = e instanceof Failure ? e.message : `Unexpected error: ${e?.message ?? e}`;
     if (JSON_OUT) emit({ error: message, ...(e?.details ? { details: e.details } : {}) });
@@ -282,9 +284,10 @@ function help() {
         ['version', 'the version of keepplain'],
         ['help', 'this list'],
     ];
-    const width = Math.max(...commands.map(([c]) => c.length));
+    const here = commands.filter(([c]) => editionRuns(c.split(' ')[0]) && (EDITION === 'full' || !/^(share auto|handoff on)/.test(c)));
+    const width = Math.max(...here.map(([c]) => c.length));
 
-    return ['Usage: keepplain <command> [--site=URL] [--agent=codex] [--json]', ...commands.map(([c, what]) => `  ${c.padEnd(width)}  ${what}`)].join('\n');
+    return ['Usage: keepplain <command> [--site=URL] [--agent=codex] [--json]', ...here.map(([c, what]) => `  ${c.padEnd(width)}  ${what}`)].join('\n');
 }
 
 /** The options of enable and disable. */
@@ -940,14 +943,17 @@ async function waitForApproval(until = Date.now() + LOGIN_WAIT_MS) {
         if (state.status === 'approved') {
             saveToken(site, state.token, state.username);
             clearPendingLogin();
-            // A Claude Code started before the sign-in noted the server's 401 and keeps it for about 15 minutes.
-            forgetMcpNeedsAuth();
+            // A Claude Code started before the sign-in noted the server's 401 and keeps it for about 15 minutes. In the
+            // directory's copy the note stays true: its server has its own sign-in, not this one.
+            if (EDITION === 'full') (await import('./lib/agents.mjs')).forgetMcpNeedsAuth();
             // The import of past sessions agreed to before the sign-in (enable), or waiting for a new one, goes on now.
             const past = pastState(site);
-            const waiting = past?.status === 'login' && past.queue?.length;
+            const waiting = EDITION === 'full' && past?.status === 'login' && past.queue?.length;
+            // The directory's copy has no background work, and no import of past sessions to go on with.
+            const importGoesOn = EDITION === 'full' && (waiting || pastDue(site));
             if (waiting) setPastState(site, { status: 'running', started_at: past.started_at ?? Date.now(), next_at: null, why: null });
             if (JSON_OUT) {
-                if (waiting || pastDue(site)) inBackground(['import-past', 'run', `--site=${site}`]);
+                if (importGoesOn) inBackground(['import-past', 'run', `--site=${site}`]);
                 return emit({ event: 'connected', username: state.username });
             }
             console.log(`Connected to ${site} as @${state.username}. ${run('build')} can send sessions now.`);
@@ -957,9 +963,10 @@ async function waitForApproval(until = Date.now() + LOGIN_WAIT_MS) {
                 await askTeams(listed);
                 for (const team of new Set(listed.map((q) => q.share).filter(Boolean))) choosePast(site, team, listed.filter((q) => q.share === team).map((q) => q.id));
             }
-            if (waiting || pastDue(site)) inBackground(['import-past', 'run', `--site=${site}`]);
+            if (importGoesOn) inBackground(['import-past', 'run', `--site=${site}`]);
             if (waiting) console.log(pastStartedLine(past.queue.length, true));
-            if (AGENT.id === 'claude-code') console.log('If Claude Code is open, run /mcp → Reconnect for keepplain, or start a new session: its library tools connect then.');
+            if (EDITION !== 'full') console.log('/keepplain:resume can read your own sessions now. The library tools search without an account; for your team\'s sessions and higher limits they sign in on their own: /mcp, choose keepplain.');
+            else if (AGENT.id === 'claude-code') console.log('If Claude Code is open, run /mcp → Reconnect for keepplain, or start a new session: its library tools connect then.');
             return;
         }
         if (state.status !== 'pending') {
@@ -1392,6 +1399,7 @@ The rules for ${[...new Set(entry.matched.map((r) => r.label))].join(', ')} come
  * Nothing is published here: a draft gets its link, to publish it first.
  */
 async function share(what) {
+    if (what === 'auto' && !editionRuns('share-auto')) throw new Failure(notInThisCopy('share auto'));
     if (what === 'auto') return shareAutoMode(positional[2]);
     if (!token) throw notConnected();
     const slug = what ? buildSlug(what) : null;
@@ -1580,8 +1588,10 @@ async function useAgent() {
         if (!agent) throw new Failure(`--agent takes claude, codex, cursor, pi or antigravity, not "${given}".`);
         return agent;
     }
+    if (EDITION !== 'full') return agentOf('claude');
     if (!TERMINAL) throw new Failure('Say which agent it is for: --agent=claude, --agent=codex, --agent=cursor, --agent=pi or --agent=antigravity.');
 
+    const { installedPlugins } = await import('./lib/agents.mjs');
     const here = detectAgents().filter((a) => a.present && agentOf(a.id));
     const withPlugin = here.filter((a) => installedPlugins(a).length);
     const candidates = withPlugin.length ? withPlugin : here;
@@ -2403,6 +2413,8 @@ function nudge(mode) {
  */
 async function handoff(what) {
     if (what === 'on' || what === 'off' || /^\d+$/.test(what ?? '')) {
+        // The offer itself is the hooks module's: the directory's copy has only /keepplain:handoff.
+        if (EDITION !== 'full') throw new Failure(notInThisCopy(`handoff ${what}`));
         setHandoff(what);
         if (JSON_OUT) return emit({ handoff: handoffOn(), threshold: handoffThreshold() });
         return console.log(handoffOn() ? `When a limit of ${AGENT.name} passes ${handoffThreshold()}%, it offers to continue in another agent on this computer, with a brief of the session. Turn it off with: handoff off` : 'The offer to continue in another agent is off. Turn it on with: handoff on');
@@ -2436,7 +2448,8 @@ async function handoff(what) {
         lines.push(target ? `Or start ${target.name} on it:` : 'Or start the next agent on it:');
         for (const c of commands) lines.push(c.command ? `  ${c.command}` : `  ${c.name}: no command line here; paste the brief into its chat.`);
     } else lines.push(`No other agent found on this computer (${SESSION_KINDS}).`);
-    lines.push(`Sign in (${run('login')}) and the next agent reads the whole session instead, on any machine: ${run('resume')}.`);
+    // Nothing sends a session by itself in the directory's copy: the next agent can read only what was sent.
+    lines.push(EDITION === 'full' ? `Sign in (${run('login')}) and the next agent reads the whole session instead, on any machine: ${run('resume')}.` : `Send this session (${run('build')}) and the next agent can read all of it instead, on any machine: ${run('resume')}.`);
     console.log(lines.join('\n'));
 }
 
@@ -2452,7 +2465,7 @@ async function whoami() {
  * `status --json`: how things are, for the desktop app, read from this computer only (the agents' own commands list their
  * plugins; nothing goes to the site). account is the name the sign-in saved; `whoami` asks the site whether it still works.
  */
-function statusJson() {
+function statusJson(agentStatus) {
     const pending = pendingLogin(site);
     let words = [];
     let wordsError = null;

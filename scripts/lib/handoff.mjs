@@ -15,7 +15,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { commandIn } from './agent.mjs';
-import { detectAgents } from './agents.mjs';
+import { detectAgents } from './detect.mjs';
 import { home, writePrivate } from './credentials.mjs';
 import { cursorPrompt } from './cursor.mjs';
 import { piPrompt } from './pi.mjs';
