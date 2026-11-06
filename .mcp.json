@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "keepplain": {
+            "type": "http",
+            "url": "https://keepplain.com/mcp"
+        }
+    }
+}
