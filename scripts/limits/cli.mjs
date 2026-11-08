@@ -10,8 +10,12 @@
  *   limits status      what has been recorded
  *   limits fit         the report [--days <n>] [--step <percent>] [--json]
  *   limits uninstall   recording off and the status line you had before, back; the samples stay
+ *   limits share       the fitted numbers to the person's KeepPlain account, once [--json]; `share on` once a day from
+ *                      then on (a recorded sample starts it in the background), `share off` stops it
  *
- * Nothing goes over the network.
+ * Nothing goes over the network unless sharing was asked for, and then only `summary()`: the plan, the windows' fitted
+ * numbers and their dates. Never a session, a token count of a session, a path or a model's answer. The keepplain file
+ * gives the request (`hooks.send`); this module, run as a file of its own, cannot share.
  */
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -46,6 +50,124 @@ export function recordSample(json, { dir = limitsDir(), claude = claudeDir() } =
     }
 }
 const slash = (p) => p.replace(/\\/g, '/');
+
+/**
+ * The account's plan as Claude Code keeps it in .claude.json: two fields of `oauthAccount` (organizationType,
+ * organizationRateLimitTier, e.g. claude_max and default_claude_max_20x). Never the credentials file.
+ */
+export function planOf({ env = process.env, home = homedir() } = {}) {
+    const path = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, '.claude.json') : join(home, '.claude.json');
+    const account = readJson(path, null)?.oauthAccount;
+
+    return planFrom(account?.organizationType, account?.organizationRateLimitTier);
+}
+
+export function planFrom(type, tier) {
+    const t = typeof tier === 'string' ? tier : '';
+    const o = typeof type === 'string' ? type : '';
+    const plan = /ultra/i.test(t + o)
+        ? 'ultra'
+        : /max_20x/i.test(t)
+          ? 'max_20x'
+          : /max_5x/i.test(t)
+            ? 'max_5x'
+            : /max/i.test(o)
+              ? 'max'
+              : /pro/i.test(o)
+                ? 'pro'
+                : /team/i.test(o)
+                  ? 'team'
+                  : /enterprise/i.test(o)
+                    ? 'enterprise'
+                    : null;
+
+    return { plan, tier: /^[a-z0-9_]{1,60}$/i.test(t) ? t : null };
+}
+
+const round = (v, digits = 4) => (typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(digits)) : null);
+const iso = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : null);
+
+function windowSummary(w) {
+    if (!w?.enough) return { enough: false, steps: w?.intervals ?? 0, ...(w?.absent ? { absent: true } : {}) };
+    const part = (p) =>
+        p
+            ? {
+                  miss: round(p.error),
+                  weights: Object.fromEntries(Object.entries(p.weights).map(([name, v]) => [name, { weight: round(v.relative), low: round(v.low), high: round(v.high), share: round(v.share), thin: Boolean(v.thin) }])),
+              }
+            : null;
+
+    return {
+        enough: true,
+        steps: w.kept,
+        risen: round(w.risen, 1),
+        from: iso(w.from),
+        to: iso(w.to),
+        dollars_per_percent: round(w.m0.dollarsPerPercent),
+        low: round(w.m0.low),
+        high: round(w.m0.high),
+        miss: round(w.m0.error),
+        tokens_per_percent: w.tokensPerPercent ? Math.round(w.tokensPerPercent) : null,
+        kinds: part(w.kinds),
+        models: part(w.families),
+        outside: w.outside ?? 0,
+        outliers: w.outliers ?? 0,
+        falls: w.falls ?? 0,
+    };
+}
+
+/** What `limits share` sends: the report's fitted numbers, the plan and the Claude Code version. Nothing per session. */
+export function summary(report, { plan = null, tier = null, version = null } = {}) {
+    return {
+        method: 1,
+        plan,
+        tier,
+        claude_code: version,
+        samples: report.samples,
+        responses: report.responses,
+        from: iso(report.first),
+        to: iso(report.last),
+        five_hour: windowSummary(report.five_hour),
+        seven_day: windowSummary(report.seven_day),
+        five_hour_windows_per_week: round(report.fiveHourWindowsPerWeek, 2),
+    };
+}
+
+/** Sharing once a day: on, when it last went, and when it was last tried (a failed try waits an hour). */
+const SHARE = 'share.json';
+const SHARE_EVERY_MS = 24 * 3600_000;
+const SHARE_RETRY_MS = 3600_000;
+
+export const shareState = (dir = limitsDir()) => ({ on: false, sentAt: null, triedAt: null, url: null, error: null, ...readJson(join(dir, SHARE), {}) });
+
+function saveShare(dir, patch) {
+    mkdirSync(dir, { recursive: true });
+    const next = { ...shareState(dir), ...patch };
+    writeFileSync(join(dir, SHARE), JSON.stringify(next, null, 2));
+
+    return next;
+}
+
+export const shareDue = (dir = limitsDir(), now = Date.now()) => {
+    const s = shareState(dir);
+    return s.on && (!s.sentAt || now - s.sentAt >= SHARE_EVERY_MS) && (!s.triedAt || now - s.triedAt >= SHARE_RETRY_MS);
+};
+
+/** The fitted numbers, sent through `send` (the keepplain file's request to the site); the state says how it went. */
+export async function shareNow(send, { dir = limitsDir(), claude = claudeDir(), env = process.env, now = Date.now(), fit = fitCommand } = {}) {
+    saveShare(dir, { triedAt: now });
+    const report = await fit([], { dir, claude });
+    const version = [...readSamples(dir)].reverse().find((s) => s.v)?.v ?? null;
+    const payload = summary(report, { ...planOf({ env }), version });
+    try {
+        const answer = await send(payload);
+        saveShare(dir, { sentAt: now, url: answer?.url ?? null, error: null });
+        return { sent: true, url: answer?.url ?? null, payload };
+    } catch (e) {
+        saveShare(dir, { error: e.message });
+        throw e;
+    }
+}
 
 function readJson(path, fallback) {
     try {
@@ -134,6 +256,8 @@ export function status({ dir = limitsDir(), claude = claudeDir() } = {}) {
         fiveHour: last?.h ?? null,
         week: last?.w ?? null,
         changes: { fiveHour: changes(samples, 'h'), week: changes(samples, 'w') },
+        plan: planOf().plan,
+        share: shareState(dir),
     };
 }
 
@@ -146,6 +270,7 @@ const pct = (v) => `${Math.round(v * 100)}%`;
 const NAMES = { input: 'uncached input', write: 'cache writes', read: 'cache reads', output: 'output' };
 
 function windowText(w, title) {
+    if (w.absent) return [`${title}: none. Claude Code got no such window for this account, so the plan has none now.`];
     if (!w.enough) return [`${title}: not enough yet (${w.intervals} step(s) of the size needed; work some more and run it again).`];
     const out = [
         `${title}`,
@@ -153,6 +278,7 @@ function windowText(w, title) {
         `  1% ≈ ${big(w.tokensPerPercent)} tokens at your mix of models and kinds`,
         `  Fitted on ${w.kept} steps (${w.risen.toFixed(1)}% in all, ${day(w.from)} to ${day(w.to)}), typical miss ${pct(w.m0.error)}; left out: ${w.outside} with no local work (use elsewhere), ${w.outliers} far off`,
     ];
+    if (w.weightSteps && w.kept < w.weightSteps) out.push(`  Token kinds and models: from ${w.weightSteps} steps (${w.kept} so far); fewer fit noise.`);
     for (const [label, part] of [['Token kinds', w.kinds], ['Models', w.families]]) {
         if (!part) continue;
         out.push(`  ${label} against list price (1.00 = counted as priced), typical miss ${pct(part.error)}:`);
@@ -191,14 +317,55 @@ export async function fitCommand(args, { dir = limitsDir(), claude = claudeDir()
     return report(samples, rows, { step: opt('--step') || undefined });
 }
 
-export async function main(args = []) {
+/**
+ * hooks, from the keepplain file: send(payload) posts the summary to the site and answers {url}; spawnShare() starts
+ * `keepplain limits share --auto` in the background; site is the site's address, for the messages.
+ */
+export async function main(args = [], hooks = {}) {
     const [cmd, ...rest] = args;
     const json = rest.includes('--json');
-    const print = (value, text) => console.log(json ? JSON.stringify(value, null, 2) : text);
+    // One object a line, as every --json command answers (the desktop app reads them so).
+    const print = (value, text) => console.log(json ? JSON.stringify(value) : text);
     if (cmd === 'record') {
         const given = rest.find((a) => a.startsWith('--sample='));
-        if (given) return void recordSample(given.slice('--sample='.length));
-        return recordCommand(readFileSync(0, 'utf8'));
+        if (given) recordSample(given.slice('--sample='.length));
+        else recordCommand(readFileSync(0, 'utf8'));
+        // Once a day while sharing is on; the child marks the try, so samples in the meantime start nothing.
+        try {
+            if (hooks.spawnShare && shareDue()) {
+                saveShare(limitsDir(), { triedAt: Date.now() });
+                hooks.spawnShare();
+            }
+        } catch {}
+        return;
+    }
+    if (cmd === 'share') {
+        const [what] = rest.filter((a) => !a.startsWith('--'));
+        if (!hooks.send) throw new Error('Sharing goes through keepplain: run keepplain limits share.');
+        if (rest.includes('--auto')) {
+            const s = shareState();
+            if (s.on && (!s.sentAt || Date.now() - s.sentAt >= SHARE_EVERY_MS)) await shareNow(hooks.send).catch(() => {});
+            return;
+        }
+        if (what === 'off') {
+            const was = shareState().on;
+            saveShare(limitsDir(), { on: false });
+            return print({ on: false }, was ? `Sharing off. What was sent stays in your account until you delete it: ${hooks.site ?? ''}/limits/mine` : 'Sharing was not on.');
+        }
+        const r = await shareNow(hooks.send);
+        if (what === 'on') saveShare(limitsDir(), { on: true });
+        const w = r.payload.seven_day.enough ? r.payload.seven_day : r.payload.five_hour.enough ? r.payload.five_hour : null;
+        return print(
+            { ...r, on: what === 'on' || shareState().on },
+            [
+                `Sent to your KeepPlain account: plan ${r.payload.plan ?? 'unknown'}, ${r.payload.samples} samples${w ? `, 1% ≈ ${money(w.dollars_per_percent)}` :', not enough steps for a fit yet'}.`,
+                'Only the fitted numbers and their dates went; no session, no path, no tokens of a session.',
+                what === 'on' ? 'From now on once a day, while recording. keepplain limits share off stops it.' : null,
+                r.url ? `Yours: ${r.url}` : null,
+            ]
+                .filter(Boolean)
+                .join('\n'),
+        );
     }
     if (cmd === 'enabled') {
         const on = enabled();
@@ -217,13 +384,13 @@ export async function main(args = []) {
     }
     if (cmd === 'status') {
         const s = status();
-        return print(s, `${s.installed ? 'Recording' : 'Not recording (keepplain limits install)'}. ${s.samples} samples, ${day(s.first)} to ${day(s.last)}; last: five-hour ${s.fiveHour ? `${s.fiveHour[0]}%` : '—'}, week ${s.week ? `${s.week[0]}%` : '—'}. Changes seen: five-hour ${s.changes.fiveHour}, week ${s.changes.week}.`);
+        return print(s, `${s.installed ? 'Recording' : 'Not recording (keepplain limits install)'}. ${s.samples} samples, ${day(s.first)} to ${day(s.last)}; last: five-hour ${s.fiveHour ? `${s.fiveHour[0]}%` : '—'}, week ${s.week ? `${s.week[0]}%` : '—'}. Changes seen: five-hour ${s.changes.fiveHour}, week ${s.changes.week}. Plan: ${s.plan ?? 'unknown'}. Sharing: ${s.share.on ? `on${s.share.sentAt ? `, last sent ${day(s.share.sentAt)}` : ''}${s.share.error ? ` (last try failed: ${s.share.error})` : ''}` : 'off'}.`);
     }
     if (cmd === 'fit') {
         const r = await fitCommand(rest);
         return print(r, render(r));
     }
-    console.log('keepplain limits install | status | fit [--days <n>] [--step <percent>] [--json] | uninstall');
+    console.log('keepplain limits install | status | fit [--days <n>] [--step <percent>] [--json] | share [on|off] | uninstall');
 }
 
 // Run as a file of its own (the copy the status line runs); inside the single keepplain file every module is the entry.

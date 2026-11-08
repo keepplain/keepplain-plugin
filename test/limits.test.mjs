@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { enabled, install, isOurs, recordCommand, recordSample, render, status, uninstall } from '../scripts/limits/cli.mjs';
+import { enabled, install, isOurs, planFrom, planOf, recordCommand, recordSample, render, shareDue, shareNow, shareState, status, summary, uninstall } from '../scripts/limits/cli.mjs';
 import { analyze, cut, nnls, report } from '../scripts/limits/fit.mjs';
 import { dollars, modelKey } from '../scripts/limits/prices.mjs';
 import { readSamples, record, sample } from '../scripts/limits/samples.mjs';
@@ -220,4 +220,74 @@ test('record with no status line before: the two windows', () => {
     shown = '';
     recordCommand('not json', { dir, out: { write: (t) => (shown += t) } });
     assert.equal(shown, '\n');
+});
+
+test('plan: from the two oauthAccount fields Claude Code keeps, never anything else', () => {
+    assert.deepEqual(planFrom('claude_max', 'default_claude_max_20x'), { plan: 'max_20x', tier: 'default_claude_max_20x' });
+    assert.deepEqual(planFrom('claude_max', 'default_claude_max_5x'), { plan: 'max_5x', tier: 'default_claude_max_5x' });
+    assert.equal(planFrom('claude_ultra', 'default_claude_ultra').plan, 'ultra');
+    assert.equal(planFrom('claude_pro', null).plan, 'pro');
+    assert.equal(planFrom('claude_max', 'something new').plan, 'max');
+    assert.equal(planFrom('claude_max', 'something new').tier, null);
+    assert.deepEqual(planFrom(undefined, undefined), { plan: null, tier: null });
+    const home = mkdtempSync(join(tmpdir(), 'ct-limits-plan-'));
+    writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'a@b.c', organizationType: 'claude_max', organizationRateLimitTier: 'default_claude_max_20x' } }));
+    assert.equal(planOf({ env: {}, home }).plan, 'max_20x');
+    assert.equal(planOf({ env: { CLAUDE_CONFIG_DIR: join(home, 'none') }, home }).plan, null);
+});
+
+test('share: the summary holds the fitted numbers and dates only', () => {
+    const { rows, samples } = week();
+    const r = report(samples, rows);
+    const s = summary(r, { plan: 'max_20x', tier: 'default_claude_max_20x', version: '2.1.310' });
+    assert.equal(s.method, 1);
+    assert.equal(s.plan, 'max_20x');
+    assert.ok(s.seven_day.enough);
+    assert.ok(s.seven_day.dollars_per_percent > 0);
+    assert.ok(s.seven_day.kinds.weights.read.weight > 0);
+    assert.match(s.from, /^2026-11-02T/);
+    const text = JSON.stringify(s);
+    for (const leak of ['claude-opus-5-5', 'session', 'path']) assert.ok(!text.includes(leak), leak);
+    assert.deepEqual(summary({ samples: 0, responses: 0, first: null, last: null, five_hour: { enough: false, intervals: 1 }, seven_day: { enough: false, intervals: 0 }, fiveHourWindowsPerWeek: null }).seven_day, { enough: false, steps: 0 });
+});
+
+test('share: sent through the given request, then once a day; a failure waits an hour', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-limits-share-'));
+    const claude = mkdtempSync(join(tmpdir(), 'ct-limits-claude-'));
+    const fit = async () => ({ samples: 3, responses: 9, first: 1, last: 2, five_hour: { enough: false, intervals: 0 }, seven_day: { enough: false, intervals: 2 }, fiveHourWindowsPerWeek: null });
+    const sent = [];
+    const send = async (payload) => (sent.push(payload), { url: 'https://keepplain.test/limits/mine' });
+    const now = Date.parse('2026-11-08T12:00:00Z');
+    assert.equal(shareDue(dir, now), false);
+    const r = await shareNow(send, { dir, claude, env: { CLAUDE_CONFIG_DIR: claude }, now, fit });
+    assert.equal(r.url, 'https://keepplain.test/limits/mine');
+    assert.equal(sent[0].samples, 3);
+    writeFileSync(join(dir, 'share.json'), JSON.stringify({ ...shareState(dir), on: true }));
+    assert.equal(shareDue(dir, now + 3600_000), false);
+    assert.equal(shareDue(dir, now + 24 * 3600_000), true);
+    await assert.rejects(shareNow(async () => { throw new Error('offline'); }, { dir, claude, env: {}, now: now + 24 * 3600_000, fit }), /offline/);
+    assert.equal(shareState(dir).error, 'offline');
+    assert.equal(shareDue(dir, now + 24.5 * 3600_000), false);
+    assert.equal(shareDue(dir, now + 25 * 3600_000), true);
+});
+
+test('fit: the weights of kinds and models wait for enough steps; what a percent is worth does not', () => {
+    const { rows, samples } = week();
+    const short = samples.filter((s) => !s.w || s.w[0] < 6);
+    const w = analyze(short, rows, 'w');
+    assert.ok(w.enough, `${w.intervals} steps`);
+    assert.ok(w.kept < w.weightSteps, `${w.kept} kept`);
+    assert.ok(w.m0.dollarsPerPercent > 0);
+    assert.equal(w.kinds, null);
+    assert.equal(w.families, null);
+    assert.match(render(report(short, rows)), /Token kinds and models: from 12 steps/);
+});
+
+test('fit: a window Claude Code never got is said to be absent, not short of steps', () => {
+    const { rows, samples } = week();
+    const r = report(samples, rows);
+    assert.equal(r.five_hour.absent, true);
+    assert.equal(r.seven_day.absent, undefined);
+    assert.match(render(r), /Five-hour window: none/);
+    assert.equal(summary(r).five_hour.absent, true);
 });

@@ -19,6 +19,8 @@ const RESET_SLACK_S = 120;
 const OUTSIDE_DOLLARS = 0.005;
 /** A part with less than this share of the spend gets a weight, marked as thin. */
 const THIN = 0.03;
+/** The weights of kinds and models are fitted from this many steps (three for each of four weights): fewer fit noise. */
+export const WEIGHT_STEPS = 12;
 const BOOTSTRAP = 200;
 /** The two ways a response may count: by the sample after it (0), or only by the one after that (headers come before the answer). */
 export const LAGS = [0, 5000];
@@ -217,6 +219,8 @@ const per = (k) => (k > 0 ? 1 / k : null);
 export function analyze(samples, rows, which, { step = STEP } = {}) {
     const { intervals: raw, falls, moves, runs: runCount } = cut(samples, which, step);
     const base = { window: which === 'h' ? 'five_hour' : 'seven_day', intervals: raw.length, runs: runCount, falls, moves };
+    // Claude Code never got this window for the account: the plan has none now (Ultra's five hours, some Max accounts).
+    if (samples.length && !samples.some((s) => s[which])) return { ...base, enough: false, absent: true };
     if (raw.length < 3) return { ...base, enough: false };
 
     // The alignment shows on the smallest steps, where one response more or less is a large part of a step.
@@ -271,8 +275,9 @@ export function analyze(samples, rows, which, { step = STEP } = {}) {
         risen: y.reduce((s, v) => s + v, 0),
         m0: { dollarsPerPercent: per(k0), low: per(ci0[1]), high: per(ci0[0]), error: fit.error },
         tokensPerPercent: k0 > 0 && spend ? tokens / spend / k0 : null,
-        kinds: weights(KINDS, (i, k) => i.kinds[k], kindShare),
-        families: weights(FAMILIES, (i, f) => i.families[f], familyShare),
+        kinds: kept.length >= WEIGHT_STEPS ? weights(KINDS, (i, k) => i.kinds[k], kindShare) : null,
+        families: kept.length >= WEIGHT_STEPS ? weights(FAMILIES, (i, f) => i.families[f], familyShare) : null,
+        weightSteps: WEIGHT_STEPS,
         mix: { kinds: kindShare, families: familyShare },
     };
 }

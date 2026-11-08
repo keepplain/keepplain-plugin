@@ -298,6 +298,15 @@ The same hook (Claude Code, Codex, Pi and Antigravity, with a sign-in) adds one 
 - A trailer that names a session the site does not hold is looked for on this computer: the gutter shows its name or first prompt, and nothing of it goes anywhere. Not signed in, that is all you get, with the commits' titles for the rest.
 - `-L <from>,<to>` blames those lines, `--rev=<commit>` the file as it was there, `-w` ignores whitespace, `--color=always|never` (colours only in a terminal by default, and never with `NO_COLOR`), `--json` for scripts and the desktop app.
 
+### What your Claude plan's limits are made of
+
+Anthropic publishes no token counts for Pro, Max or Ultra. `keepplain limits` measures them on your computer: after every answer Claude Code knows how much of the five-hour and the weekly window is used (to 0.1 percent), and its transcripts hold the tokens of every answer by kind and model.
+
+- `limits install` starts recording: in the Claude app through the plugin's hooks module, in the terminal through Claude Code's status line (your `settings.json` is backed up, and the status line you had keeps showing). `limits uninstall` stops it and puts your status line back; the samples stay.
+- `limits fit` (after a few days of ordinary work) says what one percent of each window is worth as Claude API list-price dollars and as tokens at your mix, and, from 12 steps of a percent, whether the plan counts cache reads, cache writes, output and each model as the API prices them. `--json` for scripts and the desktop app, whose Plan limits screen shows the same.
+- `limits share` sends the fitted numbers to your KeepPlain account, once; `share on` once a day from then on, `share off` stops it. They show on [keepplain.com/limits/mine](https://keepplain.com/limits/mine), and your latest counts in the medians per plan on [keepplain.com/limits](https://keepplain.com/limits) unless you turn that off there.
+- The plan comes from two fields Claude Code keeps in `~/.claude.json` (`organizationType`, `organizationRateLimitTier`); the credentials file is never read. Use of the same account elsewhere (claude.ai, another computer) shows as steps with no work here and is left out.
+
 ### On GitHub
 
 A published Build can tell whoever reviews the pull request how the change was built: `/keepplain:share` (`$keepplain:share` in Codex, `/keepplain-share` in Cursor, `keepplain share` in a terminal).
@@ -335,6 +344,7 @@ A repository whose hooks live elsewhere (`core.hooksPath`: husky, lefthook, a sh
 - If the agent used the KeepPlain library in the session: how many times it called it, and the slugs of the Builds it got (up to 20).
 - With `share`, only what goes to GitHub: the block with the Build's link, written by your `gh`. The site hears where it went (the pull request's or the repository's address). With the share auto mode on, the `origin` address of a GitHub repository a session starts in, at most once an hour.
 - Apart from sessions: the library searches the agent makes by itself (a short task description and the stack; see [The library in your agent](#the-library-in-your-agent)), and `use`, which only fetches a public playbook ([Playbooks](#playbooks)).
+- With [`limits share`](#what-your-claude-plans-limits-are-made-of), only the fitted numbers of your plan's two usage windows, the plan and their dates; never a session.
 - The token can start imports and read the library. Revoke it in Settings at any time.
 
 Each network call, and what goes with it:
@@ -350,6 +360,7 @@ Each network call, and what goes with it:
 | `GET /t/<team>/rules/<stack>.md`, `/t/<team>/rules/<stack>.json?since=<version>` | `SessionStart` (in the background, at most every six hours), `use --team` | `via=hook`, `If-None-Match` with the version in the repository, the token. Only for repositories with a team's block. |
 | `GET /api/v1/rules` | `SessionStart` (in the background, at most hourly per repository), `rules` | The repository's stacks (`laravel,php`), its GitHub owner (`acme`, nothing for other hosts), the names of team blocks already in its files, `If-None-Match` with the last version; the token. Not the repository's name, path or files. Not with rules off. |
 | `POST /api/v1/blame` | `blame` | The repository's project key (a hash of its `origin` address, or of its path), the file's path, and for each of its commits (up to 300, a hundred a request) the hash, the file's name in that commit, the first line of its message, its `Agent-Session` trailer and when it and the file's commit before it were made. The token. Never the code. Not when signed out. |
+| `POST /api/v1/limits` | `limits share`; with `limits share on`, at most once a day in the background | The plan (`max_20x`, from `~/.claude.json`), the Claude Code version, the first and last sample's dates, how many samples and answers, and each window's fitted numbers: dollars and tokens per percent with their interval, the typical miss, the weights of token kinds and model families, how many steps were kept and left out. The token. Never a session, a prompt, a path or a session's tokens. |
 | `GET /api/v1/share`, `POST /api/v1/share/attachments` | `share` | The Build's slug or this session's id; after a change, the pull request's or the repository's address. The token. |
 | `PATCH /api/v1/share/settings`, `GET /api/v1/share/pending` | `share auto on\|off`; `SessionStart` with the share auto mode on (in the background, at most hourly per repository) | The switch; the GitHub `origin` address of the repository. The token. |
 | `gh pr view`, `gh pr list`, `gh pr edit` (your GitHub CLI) | `share --pr` after your yes; the share auto mode | The pull request's new description, with the block. Your own GitHub sign-in: the plugin never sees it. |
@@ -383,6 +394,7 @@ Nothing else is read as a credential. Your GitHub sign-in stays with your `gh`, 
 | `rules-given.json` | Per session: the ids of the stack rules its prompts were given, so each comes once. Not the prompts | 7 days |
 | `enable.json`, `plugin/`, `update.json`, `nudge.json`, `handoff.json` | `enable`'s answers, the plugin it lays out, the update check, the suggestion switch, the handoff switch and percent | Until `disable` or the next `enable`/`update` |
 | `handoff/<agent>-<id>.md`, `handoffs/` | The brief of a session for another agent; which limit windows a session was told about | 14 days |
+| `limits/` | `limits install` and after: `samples.jsonl` (the time, the first 8 characters of the session id and both windows' percent and reset, when a percent changed or ten minutes passed), `last.json`, `enabled`, `chain.json` and `settings.json.bak` (the status line you had), `module/` (the status line's copy of the code), `share.json` (sending on or off, when it last went) | Until you delete the folder; `uninstall` keeps the samples |
 
 The preview writes `<temp folder>/keepplain/<session>.jsonl.gz` and `.json` (a private folder, private files): deleted after a send, when you say no (`build`, or the `discard` step of the agent's build skill), and otherwise 30 minutes after the preview, by the next run of `keepplain` or the next session start.
 
