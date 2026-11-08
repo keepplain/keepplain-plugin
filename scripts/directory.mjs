@@ -29,8 +29,11 @@ const ENTRY = 'scripts/keepplain.mjs';
 /** auto and rules are left out: they switch what the hooks do, and this copy has none. */
 export const SKILLS = ['build', 'handoff', 'login', 'logout', 'lookup', 'resume', 'share', 'use'];
 
-/** What installs, runs or replaces things on the person's computer by itself. keepplain.mjs imports them where it uses them. */
-export const LEFT_OUT = ['agents', 'antigravity-install', 'cursor-install', 'enable', 'githooks', 'hooks', 'plugin', 'update'].map((name) => `scripts/lib/${name}.mjs`);
+/**
+ * What installs, runs or replaces things on the person's computer by itself. keepplain.mjs imports them where it uses them.
+ * The limits module puts itself in Claude Code's status line, a command that runs by itself like a hook.
+ */
+export const LEFT_OUT = [...['agents', 'antigravity-install', 'cursor-install', 'enable', 'githooks', 'hooks', 'plugin', 'update'].map((name) => `scripts/lib/${name}.mjs`), 'scripts/limits/cli.mjs'];
 
 const SKILL_EDITS = {
     login: [[

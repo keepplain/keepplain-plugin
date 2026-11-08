@@ -31,8 +31,11 @@ test('Claude Code hooks run the file without a shell, one command per event', ()
     assert.deepEqual(hooks.StopFailure[0], { matcher: 'rate_limit', hooks: [{ type: 'command', command: WIN[0], args: ['hook', 'claude-code', 'stop-failure'], timeout: 10 }] });
     // The hooks module goes along, with the file written in where it would run the script.
     const laid = lay(true, WIN);
+    // Claude Code refuses a second module, and with it every hook of the plugin: limits.tsx is imported by handoff.tsx.
     assert.deepEqual(JSON.parse(laid['hooks/hooks.json']).modules, ['./handoff.tsx']);
     assert.ok(laid['hooks/handoff.tsx'].includes(`const PROGRAM: string[] | null = ${JSON.stringify(WIN)};`));
+    assert.ok(laid['hooks/handoff.tsx'].includes("from './limits.tsx'"));
+    assert.ok(laid['hooks/limits.tsx'].includes(`const PROGRAM: string[] | null = ${JSON.stringify(WIN)};`));
     assert.deepEqual(hooks.Stop[0].hooks, [{ type: 'command', command: WIN[0], args: ['hook', 'claude-code', 'stop'], timeout: 10 }]);
     // After every tool call: only auto mode's sync, and the agent does not wait for it.
     assert.deepEqual(hooks.PostToolUse[0].hooks, [{ type: 'command', command: WIN[0], args: ['hook', 'claude-code', 'tool'], timeout: 10, async: true }]);

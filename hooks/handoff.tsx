@@ -6,6 +6,7 @@
  * line shows; nothing leaves the computer. The switch and the percent are `keepplain handoff on|off|<percent>`.
  */
 import type { Register, SessionRateLimit } from 'claude-code';
+import { registerLimits } from './limits.tsx';
 
 // The installed keepplain, written in by `keepplain enable` (lib/plugin.mjs); null in the repository, where the script runs under Node.
 const PROGRAM: string[] | null = null;
@@ -53,6 +54,9 @@ async function hand($: any, target: Target, surface: unknown): Promise<void> {
 }
 
 export const register: Register = (on) => {
+    // Claude Code takes one hooks module per plugin: the limits recorder (`keepplain limits`) registers from here.
+    registerLimits(on);
+
     // The windows already offered, by their reset time: once per crossing. Lost on a reload, which is rare and harmless.
     const said = new Set<string>();
     let offer: Offer | null = null;
