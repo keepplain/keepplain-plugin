@@ -44,8 +44,9 @@
  *     --all [--days=N]                            every folder's, changed in the last 30 days, each with its project
  *   keepplain blame <file> [-L <from>,<to>]   git blame of a file with the agent session behind each line (lib/blame.mjs):
  *     --rev=<commit> -w --color=auto|always|never  the commits go to the site, the code never; --json for the desktop app
- *   keepplain limits install|status|fit|uninstall   what a Claude plan's usage limits are made of, measured on this
- *                                                 computer from Claude Code's limit figures and the transcripts (limits/cli.mjs)
+ *   keepplain limits install|status|fit|share|uninstall   what a Claude plan's usage limits are made of, measured on
+ *                                                 this computer from Claude Code's limit figures and the transcripts
+ *                                                 (limits/cli.mjs); share sends only the fitted numbers (POST /api/v1/limits)
  *   keepplain build [number|session-id]       in a terminal: preview, a yes or no, send. The number is one from
  *                                                 `sessions`; without one, the newest session. Takes preview's and
  *                                                 send's options. Not without a terminal: nothing may skip the question
@@ -228,7 +229,7 @@ try {
     else if (command === 'update') await (await import('./lib/update.mjs')).update(argId, { check: args.includes('--check') });
     else if (command === 'sessions') await sessions();
     else if (command === 'blame') await blame();
-    else if (command === 'limits') await (await import('./limits/cli.mjs')).main(args.slice(args.indexOf('limits') + 1));
+    else if (command === 'limits') await (await import('./limits/cli.mjs')).main(args.slice(args.indexOf('limits') + 1), limitsHooks());
     else if (command === 'build') await build(argId);
     else if (command === 'use') await use(argId);
     else if (command === 'share') await share(argId);
@@ -267,7 +268,7 @@ function help() {
         ['sessions [--limit=N] [--all]', "this folder's sessions, newest first; --all: every folder's"],
         ['build [number|session-id]', 'preview a session, ask, then send it as a draft'],
         ['blame <file> [-L <from>,<to>]', 'git blame with the agent session behind each line'],
-        ['limits install|status|fit|uninstall', "what your Claude plan's usage limits are made of, measured here"],
+        ['limits install|status|fit|share|uninstall', "what your Claude plan's usage limits are made of, measured here"],
         ['use <build> [--as=skill|rule|prompt]', "a published Build's playbook for this repository"],
         ['use --team=<team> --stack=<stack>', "a team's rules for a stack"],
         ['rules [on|off] [--refresh]', 'the rules your sessions here get, or stop them on this computer'],
@@ -2573,6 +2574,22 @@ async function readAll(stream) {
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** What `keepplain limits` needs from this file: the site request for `share`, and itself in the background. */
+function limitsHooks() {
+    return {
+        site,
+        send: async (payload) => {
+            if (!token) throw notConnected();
+            return api('POST', '/api/v1/limits', json(payload), true, 30_000);
+        },
+        spawnShare: () => {
+            if (!token) return;
+            const [program, programArgs] = selfCommand(['limits', 'share', '--auto']);
+            spawn(program, programArgs, { detached: true, stdio: 'ignore', windowsHide: true, env }).on('error', () => {}).unref();
+        },
+    };
 }
 
 function json(data) {
