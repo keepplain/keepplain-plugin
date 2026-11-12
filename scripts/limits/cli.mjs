@@ -22,10 +22,23 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { codexDir, codexFiles, codexPlan, readCodex } from './codex.mjs';
 import { limitsDir, readSamples, record } from './samples.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FILES = ['cli.mjs', 'samples.mjs', 'tokens.mjs', 'prices.mjs', 'fit.mjs'];
+const FILES = ['cli.mjs', 'samples.mjs', 'tokens.mjs', 'prices.mjs', 'fit.mjs', 'codex.mjs'];
+
+/** The agents measured: Claude Code from its own samples, Codex from its rollouts (codex.mjs). */
+export const AGENTS = ['claude', 'codex'];
+/** How far back Codex's own history is read by default: four weekly windows. */
+const CODEX_DAYS = 28;
+
+/** Codex's samples, token rows and plan from its rollouts of the last `days`. */
+export function codexData({ days = CODEX_DAYS, dir = codexDir(), now = Date.now() } = {}) {
+    const since = now - days * 864e5;
+
+    return readCodex(codexFiles(dir, since), since);
+}
 const MARK = 'limits record';
 
 /** Whether a status line command is this module's: the keepplain file's `limits record`, or the copy's `cli.mjs" record`. */
@@ -117,12 +130,13 @@ function windowSummary(w) {
 }
 
 /** What `limits share` sends: the report's fitted numbers, the plan and the Claude Code version. Nothing per session. */
-export function summary(report, { plan = null, tier = null, version = null } = {}) {
+export function summary(report, { agent = 'claude', plan = null, tier = null, version = null } = {}) {
     return {
         method: 1,
+        agent,
         plan,
         tier,
-        claude_code: version,
+        agent_version: version,
         samples: report.samples,
         responses: report.responses,
         from: iso(report.first),
@@ -153,20 +167,55 @@ export const shareDue = (dir = limitsDir(), now = Date.now()) => {
     return s.on && (!s.sentAt || now - s.sentAt >= SHARE_EVERY_MS) && (!s.triedAt || now - s.triedAt >= SHARE_RETRY_MS);
 };
 
-/** The fitted numbers, sent through `send` (the keepplain file's request to the site); the state says how it went. */
-export async function shareNow(send, { dir = limitsDir(), claude = claudeDir(), env = process.env, now = Date.now(), fit = fitCommand } = {}) {
+/**
+ * Whether to start `limits share --auto` now: due, and marked as tried, so the samples and hooks in the meantime start
+ * nothing more. A Claude Code sample asks (`record`), and so does the end of a Codex turn (lib/hooks.mjs), which keeps
+ * its limits without any recording.
+ */
+export function claimShare(dir = limitsDir(), now = Date.now()) {
+    try {
+        if (!shareDue(dir, now)) return false;
+        saveShare(dir, { triedAt: now });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * The fitted numbers, sent through `send` (the keepplain file's request to the site), one share per agent with
+ * samples: Claude Code's always (its own recorder), Codex's when its rollouts hold any. The state says how it went.
+ */
+export async function shareNow(send, { dir = limitsDir(), claude = claudeDir(), env = process.env, now = Date.now(), fit = fitCommand, codex = codexDir(env) } = {}) {
     saveShare(dir, { triedAt: now });
+    const payloads = [];
     const report = await fit([], { dir, claude });
     const version = [...readSamples(dir)].reverse().find((s) => s.v)?.v ?? null;
-    const payload = summary(report, { ...planOf({ env }), version });
-    try {
-        const answer = await send(payload);
-        saveShare(dir, { sentAt: now, url: answer?.url ?? null, error: null });
-        return { sent: true, url: answer?.url ?? null, payload };
-    } catch (e) {
-        saveShare(dir, { error: e.message });
-        throw e;
+    if (report.samples) payloads.push(summary(report, { ...planOf({ env }), version }));
+    const c = await fit([], { agent: 'codex', codex });
+    if (c.samples) payloads.push(summary(c, { agent: 'codex', plan: codexPlan(c.plan), version: c.version }));
+    if (!payloads.length) payloads.push(summary(report, { ...planOf({ env }), version }));
+    // Each agent's share goes on its own: one the site turns down does not hold back the other, nor make every hour
+    // send the one that went again. The day counts as sent when one went; only when none did is it tried in an hour.
+    let url = null;
+    const sent = [];
+    const errors = [];
+    for (const payload of payloads) {
+        try {
+            url = (await send(payload))?.url ?? url;
+            sent.push(payload);
+        } catch (e) {
+            errors.push(e);
+        }
     }
+    const error = errors.length ? errors.map((e) => e.message).join('; ') : null;
+    if (!sent.length) {
+        saveShare(dir, { error });
+        throw errors[0];
+    }
+    saveShare(dir, { sentAt: now, url, error });
+
+    return { sent: true, url, payload: sent[0], payloads: sent, failed: errors.map((e) => e.message) };
 }
 
 function readJson(path, fallback) {
@@ -242,12 +291,30 @@ export function uninstall({ dir = limitsDir(), claude = claudeDir() } = {}) {
     return { changed: true, restored: before?.command ?? null };
 }
 
-export function status({ dir = limitsDir(), claude = claudeDir() } = {}) {
+export function status({ dir = limitsDir(), claude = claudeDir(), agent = 'claude', codex = codexDir() } = {}) {
+    if (agent === 'codex') {
+        // Nothing to install: Codex writes the limits into every session itself.
+        const { samples, plan } = codexData({ dir: codex });
+        const last = samples.at(-1);
+        return {
+            agent,
+            installed: true,
+            samples: samples.length,
+            first: samples[0]?.at ?? null,
+            last: last?.at ?? null,
+            fiveHour: last?.h ?? null,
+            week: last?.w ?? null,
+            changes: { fiveHour: changes(samples, 'h'), week: changes(samples, 'w') },
+            plan: codexPlan(plan),
+            share: shareState(dir),
+        };
+    }
     const samples = readSamples(dir);
     const line = readJson(join(claude, 'settings.json'), {})?.statusLine?.command ?? null;
     const last = samples.at(-1);
 
     return {
+        agent,
         installed: enabled({ dir, claude }),
         statusLine: isOurs(line, dir),
         samples: samples.length,
@@ -269,12 +336,14 @@ const big = (v) => (v === null ? '—' : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` :
 const pct = (v) => `${Math.round(v * 100)}%`;
 const NAMES = { input: 'uncached input', write: 'cache writes', read: 'cache reads', output: 'output' };
 
-function windowText(w, title) {
-    if (w.absent) return [`${title}: none. Claude Code got no such window for this account, so the plan has none now.`];
+const WHO = { claude: { agent: 'Claude Code', api: 'Claude API', plan: 'Claude plan:', elsewhere: 'claude.ai, another computer' }, codex: { agent: 'Codex', api: 'OpenAI API', plan: 'ChatGPT plan in Codex:', elsewhere: 'ChatGPT, Codex cloud, another computer' } };
+
+function windowText(w, title, who = WHO.claude) {
+    if (w.absent) return [`${title}: none. ${who.agent} got no such window for this account, so the plan has none now.`];
     if (!w.enough) return [`${title}: not enough yet (${w.intervals} step(s) of the size needed; work some more and run it again).`];
     const out = [
         `${title}`,
-        `  1% ≈ ${money(w.m0.dollarsPerPercent)} at Claude API list prices (90%: ${money(w.m0.low)} to ${money(w.m0.high)}); the whole window ≈ ${money(w.m0.dollarsPerPercent * 100)}`,
+        `  1% ≈ ${money(w.m0.dollarsPerPercent)} at ${who.api} list prices (90%: ${money(w.m0.low)} to ${money(w.m0.high)}); the whole window ≈ ${money(w.m0.dollarsPerPercent * 100)}`,
         `  1% ≈ ${big(w.tokensPerPercent)} tokens at your mix of models and kinds`,
         `  Fitted on ${w.kept} steps (${w.risen.toFixed(1)}% in all, ${day(w.from)} to ${day(w.to)}), typical miss ${pct(w.m0.error)}; left out: ${w.outside} with no local work (use elsewhere), ${w.outliers} far off`,
     ];
@@ -286,22 +355,27 @@ function windowText(w, title) {
             out.push(`    ${(NAMES[name] ?? name).padEnd(15)} ${v.relative.toFixed(2)}  (${v.low.toFixed(2)} to ${v.high.toFixed(2)})  ${pct(v.share)} of spend${v.thin ? ', too little to tell' : ''}`);
         }
     }
-    if (w.falls) out.push(`  The percent fell ${w.falls} time(s) without a reset: the window may roll rather than reset.`);
+    if (w.falls) out.push(`  The percent fell ${w.falls} time(s) where no reset time came with it: each is taken as a reset.`);
+    if (w.stale) out.push(`  ${w.stale} sample(s) lower than one before them in the same window were left out: another session's older answer.`);
 
     return out;
 }
 
 export function render(r) {
-    const lines = [`Claude plan limits from ${r.samples} samples (${day(r.first)} to ${day(r.last)}) and ${r.responses} responses on this computer.`, ''];
-    lines.push(...windowText(r.seven_day, 'Weekly window'), '');
-    lines.push(...windowText(r.five_hour, 'Five-hour window'));
+    const who = WHO[r.agent] ?? WHO.claude;
+    const lines = [`${who.plan} ${r.plan ?? 'plan unknown'}, limits from ${r.samples} samples (${day(r.first)} to ${day(r.last)}) and ${r.responses} responses on this computer.`, ''];
+    lines.push(...windowText(r.seven_day, 'Weekly window', who), '');
+    lines.push(...windowText(r.five_hour, 'Five-hour window', who));
     if (r.fiveHourWindowsPerWeek) lines.push('', `A week holds about ${r.fiveHourWindowsPerWeek.toFixed(1)} five-hour windows of the same work.`);
-    lines.push('', 'List prices are the yardstick, not what the plan costs. Use of this account elsewhere (claude.ai, another computer) is left out as noise.');
+    if (r.otherQuotas) lines.push('', `${r.otherQuotas} snapshot(s) of another quota than Codex's own (a model's) were left out.`);
+    const unpriced = Object.entries(r.unpriced ?? {});
+    if (unpriced.length) lines.push('', `No list price for ${unpriced.map(([m, n]) => `${m} (${n} answers)`).join(', ')}: their tokens count for nothing here, so a percent looks cheaper than it is where they ran.`);
+    lines.push('', `List prices are the yardstick, not what the plan costs. Use of this account elsewhere (${who.elsewhere}) is left out as noise.`);
 
     return lines.join('\n');
 }
 
-export async function fitCommand(args, { dir = limitsDir(), claude = claudeDir() } = {}) {
+export async function fitCommand(args, { dir = limitsDir(), claude = claudeDir(), agent = 'claude', codex = codexDir() } = {}) {
     const { report } = await import('./fit.mjs');
     const { readRows, transcriptFiles } = await import('./tokens.mjs');
     const opt = (name) => {
@@ -309,12 +383,17 @@ export async function fitCommand(args, { dir = limitsDir(), claude = claudeDir()
         return i >= 0 ? Number(args[i + 1]) : undefined;
     };
     const days = opt('--days');
+    if (agent === 'codex') {
+        const c = codexData({ dir: codex, days: days || CODEX_DAYS });
+        const version = c.samples.findLast((s) => s.v)?.v ?? null;
+        return { ...report(c.samples, c.rows, { step: opt('--step') || undefined }), agent, plan: codexPlan(c.plan), version, otherQuotas: c.otherQuotas };
+    }
     let samples = readSamples(dir);
     if (days) samples = samples.filter((s) => s.at >= Date.now() - days * 864e5);
     const since = (samples[0]?.at ?? Date.now()) - 3600_000;
     const rows = samples.length ? readRows(transcriptFiles(claude, since), since) : [];
 
-    return report(samples, rows, { step: opt('--step') || undefined });
+    return { ...report(samples, rows, { step: opt('--step') || undefined }), agent, plan: planOf().plan };
 }
 
 /**
@@ -332,10 +411,7 @@ export async function main(args = [], hooks = {}) {
         else recordCommand(readFileSync(0, 'utf8'));
         // Once a day while sharing is on; the child marks the try, so samples in the meantime start nothing.
         try {
-            if (hooks.spawnShare && shareDue()) {
-                saveShare(limitsDir(), { triedAt: Date.now() });
-                hooks.spawnShare();
-            }
+            if (hooks.spawnShare && claimShare()) hooks.spawnShare();
         } catch {}
         return;
     }
@@ -352,13 +428,25 @@ export async function main(args = [], hooks = {}) {
             saveShare(limitsDir(), { on: false });
             return print({ on: false }, was ? `Sharing off. What was sent stays in your account until you delete it: ${hooks.site ?? ''}/limits/mine` : 'Sharing was not on.');
         }
-        const r = await shareNow(hooks.send);
+        // On first: a first send that fails (offline, the site busy) is tried again within the hour, while you work.
         if (what === 'on') saveShare(limitsDir(), { on: true });
-        const w = r.payload.seven_day.enough ? r.payload.seven_day : r.payload.five_hour.enough ? r.payload.five_hour : null;
+        let r;
+        try {
+            r = await shareNow(hooks.send);
+        } catch (e) {
+            if (what === 'on') e.message = `Sharing is on, but this send failed: ${e.message} It is tried again within the hour while you work; keepplain limits share off stops it.`;
+            throw e;
+        }
+        const line = (p) => {
+            const w = p.seven_day.enough ? p.seven_day : p.five_hour.enough ? p.five_hour : null;
+            return `  ${p.agent === 'codex' ? 'Codex' : 'Claude Code'}: plan ${p.plan ?? 'unknown'}, ${p.samples} samples${w ? `, 1% ≈ ${money(w.dollars_per_percent)}` : ', not enough steps for a fit yet'}`;
+        };
         return print(
             { ...r, on: what === 'on' || shareState().on },
             [
-                `Sent to your KeepPlain account: plan ${r.payload.plan ?? 'unknown'}, ${r.payload.samples} samples${w ? `, 1% ≈ ${money(w.dollars_per_percent)}` :', not enough steps for a fit yet'}.`,
+                'Sent to your KeepPlain account:',
+                ...r.payloads.map(line),
+                ...r.failed.map((m) => `  Not sent: ${m}`),
                 'Only the fitted numbers and their dates went; no session, no path, no tokens of a session.',
                 what === 'on' ? 'From now on once a day, while recording. keepplain limits share off stops it.' : null,
                 r.url ? `Yours: ${r.url}` : null,
@@ -382,15 +470,18 @@ export async function main(args = [], hooks = {}) {
         const r = uninstall();
         return print(r, r.changed ? `Recording off${r.restored ? `; your status line is back: ${r.restored}` : ''}. The samples stay in ${limitsDir()}.` : 'Nothing to remove: recording was not on.');
     }
+    const agent = rest.find((a) => a.startsWith('--agent='))?.slice('--agent='.length) ?? 'claude';
+    if (!AGENTS.includes(agent)) throw new Error(`Unknown agent ${agent}: claude or codex.`);
     if (cmd === 'status') {
-        const s = status();
+        const s = status({ agent });
+        if (agent === 'codex') return print(s, `Codex keeps its limits in every session: ${s.samples} samples in the last ${CODEX_DAYS} days, ${day(s.first)} to ${day(s.last)}; last: five-hour ${s.fiveHour ? `${s.fiveHour[0]}%` : '—'}, week ${s.week ? `${s.week[0]}%` : '—'}. Changes seen: five-hour ${s.changes.fiveHour}, week ${s.changes.week}. Plan: ${s.plan ?? 'unknown'}.`);
         return print(s, `${s.installed ? 'Recording' : 'Not recording (keepplain limits install)'}. ${s.samples} samples, ${day(s.first)} to ${day(s.last)}; last: five-hour ${s.fiveHour ? `${s.fiveHour[0]}%` : '—'}, week ${s.week ? `${s.week[0]}%` : '—'}. Changes seen: five-hour ${s.changes.fiveHour}, week ${s.changes.week}. Plan: ${s.plan ?? 'unknown'}. Sharing: ${s.share.on ? `on${s.share.sentAt ? `, last sent ${day(s.share.sentAt)}` : ''}${s.share.error ? ` (last try failed: ${s.share.error})` : ''}` : 'off'}.`);
     }
     if (cmd === 'fit') {
-        const r = await fitCommand(rest);
+        const r = await fitCommand(rest, { agent });
         return print(r, render(r));
     }
-    console.log('keepplain limits install | status | fit [--days <n>] [--step <percent>] [--json] | share [on|off] | uninstall');
+    console.log('keepplain limits install | status | fit [--days <n>] [--step <percent>] [--json] | share [on|off] | uninstall; status and fit take --agent=codex');
 }
 
 // Run as a file of its own (the copy the status line runs); inside the single keepplain file every module is the entry.

@@ -46,6 +46,7 @@ import { antigravityEvent, antigravityOutput, lastAntigravityPrompt, newAntigrav
 import { cursorEvent, noteCursorEvent, pruneCursorNotes, readCursorSidecar } from './cursor.mjs';
 import { readEvent } from './event.mjs';
 import { handoffDue, handoffMessage, handoffOn, handoffTargets, handoffThreshold, nearLimit, readLimits } from './handoff.mjs';
+import { claimShare } from '../limits/cli.mjs';
 import { nudgeDue, nudgeMessage, nudgeOn } from './nudge.mjs';
 import { projectRoot } from './playbooks.mjs';
 import { asksProvenance, provenanceContext } from './provenance.mjs';
@@ -304,6 +305,9 @@ function prompt({ event, agent, site, id, agentArgs }) {
 
 function stop({ event, agent, site, id, agentArgs }) {
     if (agent === 'cursor') noteCursorEvent('stop', event);
+    // Codex keeps its plan's limits in every session: with `limits share on`, a turn's end sends the day's numbers,
+    // whatever the auto mode.
+    if (agent === 'codex' && signedIn(site) && claimShare()) inBackground(['limits', 'share', '--auto', `--site=${site}`]);
     const mode = sessionAutoMode(site, id, agent);
     // Push mode sends at the push; it needs no suggestion either.
     if (id && mode === 'push') return;

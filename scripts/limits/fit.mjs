@@ -10,7 +10,7 @@
  *   m2  rise = sum of w_family x dollars         fable, opus, sonnet, haiku
  * Weights are given against m0's k: 1 means the plan counts that part as the API prices it.
  */
-import { dollars, FAMILIES, KINDS } from './prices.mjs';
+import { dollars, FAMILIES, family as familyOf, KINDS } from './prices.mjs';
 
 export const STEP = 1;
 /** Reset times this close are one window (the server may round them). */
@@ -25,22 +25,33 @@ const BOOTSTRAP = 200;
 /** The two ways a response may count: by the sample after it (0), or only by the one after that (headers come before the answer). */
 export const LAGS = [0, 5000];
 
-/** One window's samples split into runs with one reset time and a percent that never falls; falls are counted. */
+/**
+ * One window's samples split into runs with one reset time and a percent that never falls. A lower percent under the
+ * same known reset time is stale, not a fall: another session's answer that started earlier (two Codex sessions, two
+ * terminals, subagents) brings the percent its request saw, after a newer one. It is left out (`stale`). Without a
+ * reset time a fall is the only sign of a reset: it starts a new run (`falls`).
+ */
 export function runs(samples, which) {
     const out = [];
     let cur = null;
     let falls = 0;
     let moves = 0;
+    let stale = 0;
     for (const s of samples) {
         const w = s[which];
         if (!w) continue;
         const [pct, resets] = w;
-        if (cur && resets !== null && cur.resets !== null && Math.abs(resets - cur.resets) > RESET_SLACK_S) {
+        const known = cur && resets !== null && cur.resets !== null;
+        if (known && Math.abs(resets - cur.resets) > RESET_SLACK_S) {
             if (cur.points.at(-1).pct > 0.2 && resets < cur.resets + 3600) moves++;
             cur = null;
         }
         const prev = cur?.points.at(-1);
         if (prev && pct < prev.pct - 0.05) {
+            if (known) {
+                stale++;
+                continue;
+            }
             falls++;
             cur = null;
         }
@@ -48,12 +59,12 @@ export function runs(samples, which) {
         cur.points.push({ at: s.at, pct });
     }
 
-    return { runs: out, falls, moves };
+    return { runs: out, falls, moves, stale };
 }
 
 /** The intervals of one window: from the first sample of a percent to the first of a percent `step` higher. */
 export function cut(samples, which, step = STEP) {
-    const { runs: list, falls, moves } = runs(samples, which);
+    const { runs: list, falls, moves, stale } = runs(samples, which);
     const intervals = [];
     for (const run of list) {
         let start = run.points[0];
@@ -68,7 +79,7 @@ export function cut(samples, which, step = STEP) {
         }
     }
 
-    return { intervals, falls, moves, runs: list.length };
+    return { intervals, falls, moves, stale, runs: list.length };
 }
 
 const blank = () => ({ dollars: 0, tokens: 0, responses: 0, kinds: Object.fromEntries(KINDS.map((k) => [k, 0])), families: Object.fromEntries(FAMILIES.map((f) => [f, 0])), tokenKinds: { input: 0, write: 0, read: 0, output: 0 } });
@@ -105,10 +116,6 @@ export function fill(intervals, rows, lag = 0) {
     return { intervals: out, unpriced };
 }
 
-function familyOf(model = '') {
-    const m = String(model).toLowerCase().match(/fable|mythos|opus|sonnet|haiku/);
-    return m ? (m[0] === 'mythos' ? 'fable' : m[0]) : null;
-}
 
 /** Least squares on the columns in `cols`, by the normal equations; null when they are singular. */
 function ols(X, y, cols) {
@@ -217,8 +224,8 @@ const per = (k) => (k > 0 ? 1 / k : null);
 
 /** One window's report: intervals, the three fits, and the mix of the work they were fitted on. */
 export function analyze(samples, rows, which, { step = STEP } = {}) {
-    const { intervals: raw, falls, moves, runs: runCount } = cut(samples, which, step);
-    const base = { window: which === 'h' ? 'five_hour' : 'seven_day', intervals: raw.length, runs: runCount, falls, moves };
+    const { intervals: raw, falls, moves, stale, runs: runCount } = cut(samples, which, step);
+    const base = { window: which === 'h' ? 'five_hour' : 'seven_day', intervals: raw.length, runs: runCount, falls, moves, stale };
     // Claude Code never got this window for the account: the plan has none now (Ultra's five hours, some Max accounts).
     if (samples.length && !samples.some((s) => s[which])) return { ...base, enough: false, absent: true };
     if (raw.length < 3) return { ...base, enough: false };
@@ -287,6 +294,9 @@ export function report(samples, rows, options = {}) {
     const h = analyze(samples, rows, 'h', options);
     const w = analyze(samples, rows, 'w', options);
     const ratio = h.enough && w.enough && h.m0.dollarsPerPercent && w.m0.dollarsPerPercent ? w.m0.dollarsPerPercent / h.m0.dollarsPerPercent : null;
+    // Answers of models without a list price count for nothing in the fit: the report names them, with how many.
+    const unpriced = {};
+    for (const r of rows) if (!dollars(r)) unpriced[r.model] = (unpriced[r.model] ?? 0) + 1;
 
-    return { samples: samples.length, first: samples[0]?.at ?? null, last: samples.at(-1)?.at ?? null, responses: rows.length, five_hour: h, seven_day: w, fiveHourWindowsPerWeek: ratio };
+    return { samples: samples.length, first: samples[0]?.at ?? null, last: samples.at(-1)?.at ?? null, responses: rows.length, five_hour: h, seven_day: w, fiveHourWindowsPerWeek: ratio, unpriced };
 }

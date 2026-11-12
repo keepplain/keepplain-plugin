@@ -67,11 +67,12 @@ test('nnls: a weight that least squares would make negative is held at zero', ()
     assert.ok(Math.abs(exact.b[0] - 2) < 1e-9 && Math.abs(exact.b[1] - 3) < 1e-9);
 });
 
-test('cut: steps of at least 1 percent within a window; a new reset time starts again, a fall is counted', () => {
+test('cut: steps of at least 1 percent within a window; a new reset time starts again, a lower percent under it is stale', () => {
     const s = (at, pct, resets = 1000) => ({ at, w: [pct, resets] });
-    const { intervals, falls } = cut([s(1, 0), s(2, 0.4), s(3, 1.0), s(4, 1.5), s(5, 2.3), s(6, 0.1, 999999), s(7, 1.2, 999999), s(8, 0.5, 999999)], 'w');
+    const { intervals, falls, stale } = cut([s(1, 0), s(2, 0.4), s(3, 1.0), s(4, 1.5), s(5, 2.3), s(6, 0.1, 999999), s(7, 1.2, 999999), s(8, 0.5, 999999)], 'w');
     assert.deepEqual(intervals.map((i) => [i.from, i.to, i.rise]), [[1, 3, 1], [3, 5, 1.3], [6, 7, 1.1]]);
-    assert.equal(falls, 1);
+    assert.equal(falls, 0);
+    assert.equal(stale, 1);
 });
 
 test('fit: dollars per percent, and cache reads counted at half their price', () => {
@@ -266,7 +267,7 @@ test('share: sent through the given request, then once a day; a failure waits an
     assert.equal(shareDue(dir, now + 3600_000), false);
     assert.equal(shareDue(dir, now + 24 * 3600_000), true);
     await assert.rejects(shareNow(async () => { throw new Error('offline'); }, { dir, claude, env: {}, now: now + 24 * 3600_000, fit }), /offline/);
-    assert.equal(shareState(dir).error, 'offline');
+    assert.match(shareState(dir).error, /^offline/);
     assert.equal(shareDue(dir, now + 24.5 * 3600_000), false);
     assert.equal(shareDue(dir, now + 25 * 3600_000), true);
 });
@@ -290,4 +291,74 @@ test('fit: a window Claude Code never got is said to be absent, not short of ste
     assert.equal(r.seven_day.absent, undefined);
     assert.match(render(r), /Five-hour window: none/);
     assert.equal(summary(r).five_hour.absent, true);
+});
+
+test('fit: windows that reset (five hours from the first message, the week) are cut at each reset, with or without its time', () => {
+    const next = random(3);
+    const K = { h: 0.9, w: 0.09 };
+    for (const known of [true, false]) {
+        const rows = [];
+        const samples = [];
+        let at = Date.parse('2026-11-01T08:00:00Z');
+        let [hStart, hUsed, wStart, wUsed] = [null, 0, at, 0];
+        for (let i = 0; i < 6000; i++) {
+            at += 30_000 + Math.floor(next() * 90_000);
+            if (next() < 0.002) at += 6 * 3600_000;
+            const r = { at, model: next() < 0.7 ? 'claude-opus-5-5' : 'claude-sonnet-5-5', input: 20, w5: Math.floor(next() * 6000), w1: 0, read: 20_000 + Math.floor(next() * 120_000), output: 100 + Math.floor(next() * 1500), fast: false };
+            if (hStart === null || at >= hStart + 5 * 3600_000) [hStart, hUsed] = [at, 0];
+            if (at >= wStart + 5 * 864e5) [wStart, wUsed] = [at, 0];
+            const d = dollars(r);
+            const total = d.input + d.write + d.read + d.output;
+            hUsed += total * K.h;
+            wUsed += total * K.w;
+            rows.push(r);
+            const pct = (u) => Math.min(100, Math.round(u * 10) / 10);
+            samples.push({ at: at + 300, h: [pct(hUsed), known ? Math.floor((hStart + 5 * 3600_000) / 1000) : null], w: [pct(wUsed), known ? Math.floor((wStart + 7 * 864e5) / 1000) : null] });
+        }
+        for (const which of ['h', 'w']) {
+            const c = cut(samples, which);
+            assert.ok(c.runs > 1, `${which}: ${c.runs} runs`);
+            assert.ok(c.intervals.every((i) => i.rise < 2), `${which}: a step spans a reset`);
+            const a = analyze(samples, rows, which);
+            assert.ok(Math.abs(1 / a.m0.dollarsPerPercent / K[which] - 1) < 0.03, `${which} ${known}: ${1 / a.m0.dollarsPerPercent}`);
+        }
+    }
+});
+
+test('runs: a lower percent under the same reset time is another session\'s older answer, left out; without one it is a reset', () => {
+    const at = (i) => Date.parse('2026-11-10T10:00:00Z') + i * 60_000;
+    const values = [10, 10.5, 11, 10.2, 11.4, 12.1, 11.6, 12.5, 13.2];
+    const known = values.map((p, i) => ({ at: at(i), w: [p, 1794600000] }));
+    const c = cut(known, 'w');
+    assert.equal(c.runs, 1);
+    assert.equal(c.stale, 2);
+    assert.equal(c.falls, 0);
+    assert.deepEqual(c.intervals.map((i) => i.rise), [1, 1.1, 1.1]);
+    const unknown = cut(values.map((p, i) => ({ at: at(i), w: [p, null] })), 'w');
+    assert.equal(unknown.falls, 2);
+    assert.equal(unknown.stale, 0);
+});
+
+test('report: models without a list price are named, with how many answers', () => {
+    const { rows, samples } = week();
+    const r = report(samples, [...rows, { ...rows[5], model: 'codex-mini-latest' }, { ...rows[6], model: 'codex-mini-latest' }]);
+    assert.deepEqual(r.unpriced, { 'codex-mini-latest': 2 });
+    assert.match(render(r), /No list price for codex-mini-latest \(2 answers\)/);
+});
+
+test('share: an agent the site turns down does not hold back the other or the day', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-limits-share-'));
+    const one = { samples: 5, responses: 9, first: 1, last: 2, five_hour: { enough: false, intervals: 0 }, seven_day: { enough: false, intervals: 2 }, fiveHourWindowsPerWeek: null };
+    const fit = async (_a, { agent } = {}) => ({ ...one, agent });
+    const send = async (p) => {
+        if (p.agent === 'codex') throw new Error('The plan field is invalid.');
+        return { url: 'https://keepplain.test/limits/mine' };
+    };
+    const now = Date.parse('2026-11-12T12:00:00Z');
+    const r = await shareNow(send, { dir, env: {}, fit, now });
+    assert.deepEqual(r.payloads.map((p) => p.agent), ['claude']);
+    assert.deepEqual(r.failed, ['The plan field is invalid.']);
+    assert.equal(shareState(dir).sentAt, now);
+    await assert.rejects(shareNow(async () => { throw new Error('offline'); }, { dir, env: {}, fit, now: now + 1 }), /offline/);
+    assert.equal(shareState(dir).sentAt, now);
 });
