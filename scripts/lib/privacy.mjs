@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/privacyScan.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:7d59634310ec6f78ef1b91c554d3eadabcc9cae5617a83ffa8356c2f041f921e
+// sha256:99e01fb9793b6c3fa0d91cf51ed86f4ce615c775b00cd1d0c3003da43fbd1f10
 
 /**
  * The privacy check that runs where the session lives (plan: local-first privacy, stage 2): in the browser before an
@@ -16,6 +16,26 @@
  * "Send it as it is" for a finding is decided here too. Only a SHA-256 of such a value goes to the server, so its
  * scanner leaves the value alone.
  */
+/** An id as Claude writes it. On its own it says nothing (a session has one too): ACCOUNT_ID names the places. */
+const UUID = '[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}(?![0-9A-Fa-f])';
+/** Between two parts of a path: a separator, doubled or doubled twice inside JSON, or the dash of a project folder's name. */
+const SEP = String.raw `(?:[\\/]{1,4}|-)`;
+/**
+ * Where an id is the Claude account's or its organization's:
+ *   - the desktop app's folders, <account>/<organization> inside: a session it starts runs in
+ *     …/Claude/scratch-workspaces/<account>/<organization>/…, so every path and command of it carries both;
+ *   - ~/.claude/plugins/synced/<organization>_…, the plugins an organization gives its members;
+ *   - named outright: organizationUuid and accountUuid (~/.claude.json, the transcript's own credential_org line),
+ *     CLAUDE_CODE_ORGANIZATION_UUID in a printed environment, ?org= in a link the API answers with;
+ *   - <account>/<organization>/local_<session>, a listing made inside the app's folder.
+ */
+const ACCOUNT_PLACE = [
+    String.raw `\b(?:scratch-workspaces|local-agent-mode-sessions|claude-code-sessions)${SEP}(?:skills-plugin[\\/]{1,4})?`,
+    String.raw `\bplugins[\\/]{1,4}synced[\\/]{1,4}`,
+    String.raw `(?:(?:[Oo]rganization|[Aa]ccount)_?(?:[Uu]uid|UUID)|(?:ORGANIZATION|ACCOUNT)_UUID)\\*["']?\s*[:=]\s*\\*["']?`,
+    String.raw `\b(?:anthropic\.com|claude\.ai)\/[^\s"'<>]*[?&]org(?:anization)?=`,
+    String.raw `(?<![0-9A-Fa-f-])(?=${UUID}[\\/]{1,4}${UUID}[\\/]{1,4}local_)`,
+].join('|');
 /** In SecretScanner::RULES order: specific token formats first, generic KEY=value assignments last. */
 const RULES = [
     { type: 'PRIVATE_KEY', pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/g },
@@ -38,9 +58,12 @@ const RULES = [
     { type: 'SECRET_ASSIGNMENT', pattern: /\b[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|AUTH_KEY)[A-Z0-9_]*["']?\s*[:=]\s*["']?([^\s"'#,;]{8,})/g, group: 1 },
     // The user part of scheme://user@host is not an address: the first branch takes it whole and it is left as it is.
     { type: 'EMAIL', pattern: /(\b[a-z][a-z0-9+.-]*:\/\/[^\s@/"']*@)|\b[A-Za-z0-9._%+-]+@(?!(?:example|test|localhost)\.)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b/g, severity: 'warning', skip: 1 },
-    { type: 'IP_ADDRESS', pattern: /\b(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?!\d|\.\d)\b/g, severity: 'warning' },
+    { type: 'IP_ADDRESS', pattern: /\b(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])\b/g, severity: 'warning' },
     // A company's own network: an address in a URL or after user@, or anything under .corp / .intranet.
     { type: 'INTERNAL_HOST', pattern: /(?<=:\/\/|@)(?:[A-Za-z0-9-]+\.)+(?:internal|corp|intranet|lan|local|localdomain)\b|\b(?:[A-Za-z0-9-]+\.)+(?:corp|intranet|svc\.cluster\.local)\b/g, severity: 'warning' },
+    // The Claude account and its organization, by id: they name the person like an address does. Both when they come
+    // as a pair, one after the other in a path.
+    { type: 'ACCOUNT_ID', pattern: new RegExp(`(?:${ACCOUNT_PLACE})(${UUID}(?:${SEP}${UUID})?)`, 'g'), group: 1, severity: 'warning' },
 ];
 const IGNORED_VALUES = new Set(['changeme', 'password', 'xxxxxxxx', 'your-secret-here', 'secret', 'null', 'undefined']);
 const PLACEHOLDER = /example|placeholder|dummy|x{6,}|\*{4,}|\.{3}|…|^<.*>$/i;
@@ -199,5 +222,6 @@ export const PRIVACY_LABELS = {
     EMAIL: 'email address',
     IP_ADDRESS: 'public IP address',
     INTERNAL_HOST: 'internal hostname',
+    ACCOUNT_ID: 'Claude account or organization id',
     TERM: 'word from your list',
 };
