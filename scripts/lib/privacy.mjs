@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/privacyScan.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:a9a053d412c6959a754952957f369277a3431b78945ef051648d5046273a8d7f
+// sha256:9b8622dddec4eac1f0d017ef273db95f791f3838d6aa8657e507072798d87474
 
 /**
  * The privacy check that runs where the session lives (plan: local-first privacy, stage 2): in the browser before an
@@ -107,7 +107,7 @@ const IGNORED_EMAIL = /^(?:git|[^@]*no-?reply)@|@users\.noreply\./i;
  * which is a route or a link even when the name is the person's.
  */
 const DRIVE = String.raw `\b[A-Za-z]:|(?<![\w.~-])\/(?:mnt\/)?[A-Za-z](?=\/users\/)`;
-const HOME = new RegExp(String.raw `(?:(${DRIVE})(?:\\+|\/)|(\\+|\/)|(?<![A-Za-z0-9_]))(users|home)(\\+|\/)([^\\/\s"'\`:*?<>|]+)`, 'gi');
+const HOME = new RegExp(String.raw `(?:(${DRIVE})(?:\\+|\/)|((?<!\\)\\+|\/)|(?<![A-Za-z0-9_]))(users|home)(\\+|\/)([^\\/\s"'\`:*?<>|]+)`, 'gi');
 const NOBODY = new Set(['Public', 'Shared', 'Default', 'public', 'shared', 'default', 'runner', 'you', 'user', 'username', 'me', 'example']);
 /**
  * Claude Code names a project's folder after its path, every character that is not a letter or a digit turned into a
