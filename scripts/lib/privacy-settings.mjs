@@ -10,6 +10,7 @@
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { home, writePrivate } from './credentials.mjs';
 import { Failure } from './failure.mjs';
@@ -69,11 +70,25 @@ export function keep(hashes) {
     writePrivate(join(home(), 'kept.json'), JSON.stringify({ sha256: all }, null, 2) + '\n');
 }
 
-/** A check with the person's words and kept values; kept values are matched by their hash. */
+/**
+ * The account this runs under. The check learns a user name from the home folders a session names, but a session in
+ * a project on another drive may name none and still print the name: the owner column of `ls -l`, a git author. So
+ * the name is given outright. It is redacted in those places only, never as a word wherever it stands.
+ */
+export function userNames() {
+    try {
+        return [userInfo().username];
+    } catch {
+        // No such account in the system's list (a container run under a bare uid).
+        return [];
+    }
+}
+
+/** A check with the person's words, user name and kept values; kept values are matched by their hash. */
 export function privacyScan() {
     const kept = keptHashes();
 
-    return new PrivacyScan({ terms: terms(), keep: (value) => kept.has(sha256(value)) });
+    return new PrivacyScan({ terms: terms(), names: userNames(), keep: (value) => kept.has(sha256(value)) });
 }
 
 /** What goes to the site: counts, and the hashes of the kept values found in this session. Never a value. */

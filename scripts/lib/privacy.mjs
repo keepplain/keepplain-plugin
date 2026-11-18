@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/privacyScan.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:99e01fb9793b6c3fa0d91cf51ed86f4ce615c775b00cd1d0c3003da43fbd1f10
+// sha256:1109ee794a803074de7edaf358d3b61595591d6682ac2aebfe1bf31fe693969a
 
 /**
  * The privacy check that runs where the session lives (plan: local-first privacy, stage 2): in the browser before an
@@ -10,8 +10,9 @@
  *
  * The rules are App\Services\Import\SecretScanner's, in the same order, run over the same strings the server's
  * TurnParser reads (the string values of each slimmed line). The server runs its own copy again and redacts anything
- * this one missed for good, without keeping the value. Two more rules exist only here: a home folder in a path
- * becomes ~, and the person's own list of words (client names, internal services) is redacted as TERM.
+ * this one missed for good, without keeping the value. Three more rules exist only here: a home folder in a path
+ * becomes ~, the user name that folder gave away is redacted as USER_NAME where a listing or git prints it, and the
+ * person's own list of words (client names, internal services) is redacted as TERM.
  *
  * "Send it as it is" for a finding is decided here too. Only a SHA-256 of such a value goes to the server, so its
  * scanner leaves the value alone.
@@ -70,10 +71,53 @@ const PLACEHOLDER = /example|placeholder|dummy|x{6,}|\*{4,}|\.{3}|…|^<.*>$/i;
 const REFERENCE = /^(?:[$%{(<[]|process\.env|os\.environ|env\(|getenv|config\(|secrets\.)/i;
 const IGNORED_EMAIL = /^(?:git|[^@]*no-?reply)@|@users\.noreply\./i;
 /**
- * A home folder names the person: C:\Users\ann, /Users/ann, /home/ann become ~. Doubled backslashes are JSON inside a
- * string. Folder names that are nobody's (Public, Shared, the CI runner) stay.
+ * A home folder names the person: C:\Users\ann, /Users/ann, /home/ann become ~, and each counts in `paths`. Only
+ * here: the server has no such rule, a session that came without this check keeps its paths as they are.
+ *
+ *   - Backslashes in any number: a path inside JSON has them doubled, JSON quoted inside JSON doubled again.
+ *   - After a drive Users is read in any case, and the drive goes with it: c:\users\ann, and what Git Bash and WSL
+ *     make of it, /c/Users/ann and /mnt/c/users/ann. Without a drive the case is exact: /users/42 is a route.
+ *   - Folder names that are nobody's (Public, Shared, the CI runner, the stand-ins of documentation) stay.
+ *
+ * The name such a folder gave away is remembered for the session (`names`). With it, the same folder is found where
+ * the pattern alone would not dare: Users\ann with nothing in front, \users\ann in any case. Never /users/ann,
+ * which is a route or a link even when the name is the person's.
  */
-const HOME = /(?:\b[A-Za-z]:)?(?:\\{1,2}|\/)(?:Users|home)(?:\\{1,2}|\/)(?!(?:Public|Shared|Default|runner|you|user|username|me|example)(?:[\\/"'\s]|$))[^\\/\s"'`:*?<>|]+/g;
+const DRIVE = String.raw `\b[A-Za-z]:|(?<![\w.~-])\/(?:mnt\/)?[A-Za-z](?=\/users\/)`;
+const HOME = new RegExp(String.raw `(?:(${DRIVE})(?:\\+|\/)|(\\+|\/)|(?<![A-Za-z0-9_]))(users|home)(\\+|\/)([^\\/\s"'\`:*?<>|]+)`, 'gi');
+const NOBODY = new Set(['Public', 'Shared', 'Default', 'public', 'shared', 'default', 'runner', 'you', 'user', 'username', 'me', 'example']);
+/**
+ * Claude Code names a project's folder after its path, every character that is not a letter or a digit turned into a
+ * dash: ~/.claude/projects/C--Users-ann-code-shop, -home-ann-code-shop, -mnt-c-Users-ann-code. The name in it goes like
+ * the one in a path: ~-code-shop. A dash may be the name's own (john.smith is john-smith here), so a name already
+ * learned from a path is taken whole; otherwise the name is the first part, and only where the folder's name starts:
+ * after a drive (C--Users-), or as -home- / -Users- with no letter, digit or dash in front. So my-home-page, --home-dir
+ * and a project called users-guide stay.
+ */
+const DASHED = /((?<![A-Za-z0-9])[A-Za-z]-|(?<![A-Za-z0-9-])-(?:mnt-)?[A-Za-z])?-(users|home)-([A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)/gi;
+/** What a user name looks like: what HOME took for a folder is checked against it before it is remembered. */
+const NAME = String.raw `[\p{L}\p{N}_][\p{L}\p{N}_.-]*`;
+const IS_NAME = new RegExp(`^${NAME}$`, 'u');
+/**
+ * The same user name outside a path. Any name in these places is somebody's (a colleague's commit, root's file), so
+ * a pattern alone would redact other people: only a name a home folder of this session gave away, or one the caller
+ * knows (PrivacyOptions.names), is replaced, and only here, not wherever the word stands, since the name may be a
+ * plain word (dev, node, admin).
+ *
+ *   - `ls -l`: the owner and the group column;
+ *   - `ps -ef`, `ps aux`: the name that opens a line of numbers;
+ *   - git: the name in front of its address, as in Author: ann <…>, Commit:, a shortlog, Signed-off-by;
+ *   - named outright: user.name=ann, USER=ann, USERNAME=ann, LOGNAME=ann.
+ *
+ * A finding like any other: USER_NAME, a warning, the person may send it as it is (a git author is often public).
+ * The server has no twin of this rule: it has no home folders to learn the name from.
+ */
+const NAME_PLACES = [
+    { pattern: /([-dlcbps][-rwxsStT]{9}[+@.]?[ \t]+\d+[ \t]+)(\S+)([ \t]+)(\S+)(?=[ \t])/g, names: [2, 4] },
+    { pattern: new RegExp(String.raw `((?:^|[\r\n]|\\n)[ \t]*)(${NAME})(?=[ \t]+\d+[ \t]+\d+(?:\.\d+)?[ \t])`, 'gu'), names: [2] },
+    { pattern: new RegExp(String.raw `(?<![\p{L}\p{N}_.-])()(${NAME})(?=[ \t]+<(?:\[REDACTED:EMAIL\]|[^\s<>@]*@[^\s<>]*)>)`, 'gu'), names: [2] },
+    { pattern: new RegExp(String.raw `(\buser\.name(?:=|[ \t]+)\\?["']?|\b(?:USER|USERNAME|LOGNAME)=)(${NAME})`, 'gu'), names: [2] },
+];
 export function placeholder(type) {
     return `[REDACTED:${type}]`;
 }
@@ -105,6 +149,23 @@ function preview(value) {
     const v = value.replace(/\s+/g, ' ');
     return v.length <= 16 ? `${v.slice(0, 2)}…` : `${v.slice(0, 4)}…`;
 }
+/** Whether HOME matched a home folder by its own pattern: Users in any case after a drive, else spelled exactly. */
+function isHome(drive, sep, folder) {
+    const exact = folder === 'Users' || folder === 'home';
+    return drive !== undefined ? exact || folder.toLowerCase() === 'users' : sep !== undefined && exact;
+}
+/** A name without the punctuation of the sentence around it: "(/home/ann)." names ann, /home/$(whoami) keeps its bracket. */
+function bare(name) {
+    let own = name;
+    while (own !== '') {
+        const last = own[own.length - 1];
+        const opening = { ')': '(', ']': '[', '}': '{' }[last];
+        if (!'.,;!'.includes(last) && (opening === undefined || own.includes(opening)))
+            break;
+        own = own.slice(0, -1);
+    }
+    return own === '' ? name : own;
+}
 function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -114,8 +175,13 @@ export class PrivacyScan {
     keep;
     /** Paths with a home folder turned into ~. */
     paths = 0;
+    /** The user names this session's home folders gave away, in lower case; `dashed` as a project folder's name has them. */
+    names = new Set();
+    dashed = [];
     constructor(options = {}) {
         this.keep = options.keep ?? (() => false);
+        for (const name of options.names ?? [])
+            this.know(name.trim());
         const terms = (options.terms ?? []).map((t) => t.trim()).filter((t) => t.length >= 2);
         this.rules = terms.length
             ? [
@@ -129,6 +195,10 @@ export class PrivacyScan {
     }
     /** One string with every finding replaced. */
     text(input) {
+        this.learn(input);
+        return this.redact(input);
+    }
+    redact(input) {
         let text = input;
         for (const rule of this.rules) {
             rule.pattern.lastIndex = 0;
@@ -139,42 +209,136 @@ export class PrivacyScan {
                 const value = m[rule.group ?? 0] ?? '';
                 if (value === '' || value.includes('[REDACTED:') || (rule.type !== 'TERM' && isNotASecret(rule.type, value)))
                     return whole;
-                const kept = this.record(rule, value);
+                const kept = this.record(rule.type, rule.severity ?? 'secret', value);
                 return kept ? whole : whole.split(value).join(placeholder(rule.type));
             });
         }
-        return text.replace(HOME, () => {
+        return this.home(this.ownName(text));
+    }
+    /** Remembers the user name of every home folder in the text, so it is known wherever else it stands. */
+    learn(text) {
+        for (const [, drive, sep, folder, , name] of text.matchAll(HOME))
+            if (isHome(drive, sep, folder))
+                this.know(bare(name));
+    }
+    /** A user name, unless it is nobody's or no name at all (/home/$USER, a folder with spaces cut short). */
+    know(name) {
+        const own = name.toLowerCase();
+        if (NOBODY.has(name) || this.names.has(own) || own.length > 64 || !IS_NAME.test(own))
+            return;
+        this.names.add(own);
+        // Longest first: john-smith before john.
+        this.dashed = [...this.names].map((n) => n.replace(/[^a-z0-9]/g, '-')).sort((a, b) => b.length - a.length);
+    }
+    learnIn(input) {
+        if (typeof input === 'string')
+            this.learn(input);
+        else if (Array.isArray(input))
+            for (const v of input)
+                this.learnIn(v);
+        else if (input && typeof input === 'object')
+            for (const v of Object.values(input))
+                this.learnIn(v);
+    }
+    /** The learned user name where a listing or git prints it (NAME_PLACES). */
+    ownName(input) {
+        if (this.names.size === 0)
+            return input;
+        let text = input;
+        for (const place of NAME_PLACES) {
+            text = text.replace(place.pattern, (...m) => {
+                // The groups of a place make up its whole match; the last two arguments are the offset and the text.
+                const parts = m.slice(1, -2);
+                let replaced = false;
+                for (const i of place.names) {
+                    const own = bare(parts[i - 1]);
+                    if (!this.names.has(own.toLowerCase()) || this.record('USER_NAME', 'warning', own))
+                        continue;
+                    parts[i - 1] = placeholder('USER_NAME') + parts[i - 1].slice(own.length);
+                    replaced = true;
+                }
+                return replaced ? parts.join('') : m[0];
+            });
+        }
+        return text;
+    }
+    /** Home folders, in a path and in the dashed name of a project folder, become ~. */
+    home(input) {
+        const text = input.replace(HOME, (whole, drive, sep, folder, after, name) => {
+            // A word from the person's list that is their user name too: redacted already, nothing left to shorten.
+            if (name.startsWith('[REDACTED'))
+                return whole;
+            const own = bare(name);
+            if (isHome(drive, sep, folder)) {
+                if (NOBODY.has(own))
+                    return whole;
+            }
+            else if (!this.names.has(own.toLowerCase()) || (after[0] === '/' && folder !== 'Users' && folder !== 'home')) {
+                // Not the known name; or users/ann with slashes and not spelled as the folder is: a route, a link.
+                return whole;
+            }
             this.paths++;
-            return '~';
+            return `~${name.slice(own.length)}`;
+        });
+        return text.replace(DASHED, (whole, drive, folder, rest, offset, source) => {
+            const lower = rest.toLowerCase();
+            const learned = this.dashed.find((n) => lower.startsWith(n) && (lower.length === n.length || lower[n.length] === '-'));
+            // Where a project folder's name starts: after a drive, or -home- / -Users- with nothing of a longer name in front.
+            const starts = drive !== undefined ? folder.toLowerCase() === 'users' : (folder === 'Users' || folder === 'home') && !/[A-Za-z0-9-]/.test(source[offset - 1] ?? '');
+            const first = rest.split('-', 1)[0];
+            if (learned === undefined && (!starts || NOBODY.has(first)))
+                return whole;
+            this.paths++;
+            return `~${rest.slice((learned ?? first).length)}`;
         });
     }
     /** Every string inside a JSON value (a slimmed session line), keys left alone. */
     value(input) {
+        this.learnIn(input);
+        return this.walk(input);
+    }
+    walk(input) {
         if (typeof input === 'string')
-            return this.text(input);
+            return this.redact(input);
         if (Array.isArray(input))
-            return input.map((v) => this.value(v));
+            return input.map((v) => this.walk(v));
         if (input && typeof input === 'object') {
             const out = {};
             for (const [k, v] of Object.entries(input))
-                out[k] = this.value(v);
+                out[k] = this.walk(v);
             return out;
         }
         return input;
     }
-    /** JSON lines, each scanned; a line that is not JSON is scanned as text. */
+    /**
+     * JSON lines, each scanned; a line that is not JSON is scanned as text. Read twice: first for the home folders, so
+     * the user name is known from the first line on, wherever in the session its folder shows up.
+     */
     jsonl(text) {
-        return text
-            .split('\n')
+        const lines = text.split('\n');
+        const parsed = (line) => {
+            try {
+                return JSON.parse(line);
+            }
+            catch {
+                return undefined;
+            }
+        };
+        for (const line of lines) {
+            if (line.trim() === '')
+                continue;
+            const value = parsed(line);
+            if (value === undefined)
+                this.learn(line);
+            else
+                this.learnIn(value);
+        }
+        return lines
             .map((line) => {
             if (line.trim() === '')
                 return line;
-            try {
-                return JSON.stringify(this.value(JSON.parse(line)));
-            }
-            catch {
-                return this.text(line);
-            }
+            const value = parsed(line);
+            return value === undefined ? this.redact(line) : JSON.stringify(this.walk(value));
         })
             .join('\n');
     }
@@ -189,11 +353,11 @@ export class PrivacyScan {
                 found[f.type] = (found[f.type] ?? 0) + f.count;
         return { v: 1, found, paths: this.paths, kept: keptHashes };
     }
-    record(rule, value) {
-        const key = `${rule.type}\u0000${value}`;
+    record(type, severity, value) {
+        const key = `${type}\u0000${value}`;
         let f = this.found.get(key);
         if (!f) {
-            f = { n: this.found.size + 1, type: rule.type, severity: rule.severity ?? 'secret', preview: preview(value), count: 0, kept: this.keep(value, rule.type), value };
+            f = { n: this.found.size + 1, type, severity, preview: preview(value), count: 0, kept: this.keep(value, type), value };
             this.found.set(key, f);
         }
         f.count++;
@@ -223,5 +387,6 @@ export const PRIVACY_LABELS = {
     IP_ADDRESS: 'public IP address',
     INTERNAL_HOST: 'internal hostname',
     ACCOUNT_ID: 'Claude account or organization id',
+    USER_NAME: 'user name on this computer',
     TERM: 'word from your list',
 };
