@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/slimSession.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:e6cfbbf2b0f213660b325e7e188a065d4401118ab449ad4a937a4bb1cf877416
+// sha256:785f4317b0e559cb1f16a5ff09c824e5d4a9255765958348b6977b3a7e064e66
 
 /**
  * Claude Code and Codex sessions are mostly weight nobody reads: screenshots as base64, whole files
@@ -93,7 +93,9 @@ function exitCode(output) {
 export function withheldReason(path) {
     const lower = path.toLowerCase();
     const name = lower.split('/').pop() ?? '';
-    if (/^\.env(\.|$)/.test(name) && !/\.(example|sample|dist|template)$/.test(name))
+    // An env file under any of its names: .env, .env.local, .env-prod, prod.env.bak, and the pattern a command reads them
+    // all by (`cat .env*`), which is a word of the command like a name. Not .envoy or environment.ts; not the examples.
+    if (/\.env(?![a-z0-9])/.test(name) && !/\.(example|sample|dist|template)[*?]*$/.test(name))
         return 'sensitive';
     if (/^(\.npmrc|\.netrc|\.pypirc|\.pgpass|auth\.json)$/.test(name) || name.startsWith('credentials') || /^id_(rsa|dsa|ecdsa|ed25519)/.test(name))
         return 'sensitive';

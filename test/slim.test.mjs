@@ -85,9 +85,11 @@ test('env and credential files go by name only: the list the site uses', () => {
         'secrets.yml', 'secrets.yaml', 'config/secrets.json', 'secrets.toml', 'prod.tfvars', 'terraform.tfstate', 'terraform.tfstate.backup', '.htpasswd',
         'application_default_credentials.json', 'local.settings.json', 'vault.kdbx', 'notes.txt.gpg', 'office.ovpn', 'home/me/.ssh/known_hosts',
         '/home/me/.ssh/config', '.vault-token', '.s3cfg', '.boto', '.terraformrc', '.env', '.env.local', 'id_ed25519',
+        // Other names of an env file, and the pattern a command reads them all by.
+        '.env-prod', '.env_local', 'prod.env.bak', '.env*', '.env?',
     ];
     for (const path of sensitive) assert.equal(withheldReason(path), 'sensitive', path);
-    for (const path of ['.env.example', 'environment.ts', 'src/secrets.ts', 'kube/config.ts', 'docs/ssh.md', 'config.json']) assert.equal(withheldReason(path), null, path);
+    for (const path of ['.env.example', '.env.example*', '.envoy.yml', 'environment.ts', 'src/secrets.ts', 'kube/config.ts', 'docs/ssh.md', 'config.json']) assert.equal(withheldReason(path), null, path);
 });
 
 test('the output of a call that reads a sensitive file stays here, in both agents', () => {

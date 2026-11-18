@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/privacyScan.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:1109ee794a803074de7edaf358d3b61595591d6682ac2aebfe1bf31fe693969a
+// sha256:a9a053d412c6959a754952957f369277a3431b78945ef051648d5046273a8d7f
 
 /**
  * The privacy check that runs where the session lives (plan: local-first privacy, stage 2): in the browser before an
@@ -37,31 +37,49 @@ const ACCOUNT_PLACE = [
     String.raw `\b(?:anthropic\.com|claude\.ai)\/[^\s"'<>]*[?&]org(?:anization)?=`,
     String.raw `(?<![0-9A-Fa-f-])(?=${UUID}[\\/]{1,4}${UUID}[\\/]{1,4}local_)`,
 ].join('|');
-/** In SecretScanner::RULES order: specific token formats first, generic KEY=value assignments last. */
+/**
+ * In SecretScanner::RULES order: specific token formats first, generic KEY=value assignments last. A token may start at
+ * a word's start or right after a JSON string's \n, \r or \t (SecretScanner::B): that n is a letter, so \b alone sees no
+ * word start at the token that opens the next line of a file being written.
+ *
+ * No rule may read one long run of characters again from each of its places: that costs the square of its length. So a
+ * JWT and a host name start once, where their run does (SecretScanner::START); a private key runs to the next BEGIN or
+ * END marker and no further; a variable's name, a URL's scheme and an OpenAI key up to its T3BlbkFJ have a length limit.
+ */
 const RULES = [
-    { type: 'PRIVATE_KEY', pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----/g },
-    { type: 'ANTHROPIC_KEY', pattern: /\bsk-ant-(?:api|admin|oat)\d{0,2}-?[A-Za-z0-9_-]{20,}/g },
-    { type: 'OPENAI_KEY', pattern: /\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}T3BlbkFJ[A-Za-z0-9_-]{20,}|\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}|\bsk-[A-Za-z0-9]{48}\b/g },
-    { type: 'STRIPE_KEY', pattern: /\b(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{16,}\b|\bwhsec_[0-9A-Za-z]{24,}\b/g },
-    { type: 'GITHUB_TOKEN', pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{50,}\b/g },
-    { type: 'AWS_ACCESS_KEY', pattern: /\b(?:AKIA|ASIA|ABIA|ACCA|AGPA|AIDA|AROA)[0-9A-Z]{16}\b/g },
+    // A key cut before its END (a tool's output keeps its first lines only) is one too: the lines of base64 after BEGIN go,
+    // with what a diff or a numbered listing puts before each (a sign, cat -n's or grep -n's line number).
+    { type: 'PRIVATE_KEY', pattern: /-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----(?:(?:[^-]|-(?!----(?:BEGIN|END) ))*-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|(?:(?:\s|\\+[nr])+(?:[-+>]|\d+(?:→|[:|])|[^\s:\\]{1,60}:\d+[:-])?[ \t]*)?[A-Za-z0-9/+=]{40,}(?:(?:\s|\\+[nr])+(?:[-+>]|\d+(?:→|[:|])|[^\s:\\]{1,60}:\d+[:-])?[ \t]*[A-Za-z0-9/+=]{16,})*)/g },
+    { type: 'ANTHROPIC_KEY', pattern: /(?:\b|(?<=\\[nrt]))sk-ant-(?:api|admin|oat)\d{0,2}-?[A-Za-z0-9_-]{20,}/g },
+    { type: 'OPENAI_KEY', pattern: /(?:\b|(?<=\\[nrt]))sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,200}T3BlbkFJ[A-Za-z0-9_-]{20,}|(?:\b|(?<=\\[nrt]))sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{40,}|(?:\b|(?<=\\[nrt]))sk-[A-Za-z0-9]{48}\b/g },
+    { type: 'STRIPE_KEY', pattern: /(?:\b|(?<=\\[nrt]))(?:sk|rk|pk)_(?:live|test)_[0-9A-Za-z]{16,}\b|(?:\b|(?<=\\[nrt]))whsec_[0-9A-Za-z]{24,}\b/g },
+    { type: 'GITHUB_TOKEN', pattern: /(?:\b|(?<=\\[nrt]))(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b|(?:\b|(?<=\\[nrt]))github_pat_[A-Za-z0-9_]{50,}\b/g },
+    { type: 'AWS_ACCESS_KEY', pattern: /(?:\b|(?<=\\[nrt]))(?:AKIA|ASIA|ABIA|ACCA|AGPA|AIDA|AROA)[0-9A-Z]{16}\b/g },
     // (?i:aws) in PHP: spelled out, Node 20 has no inline modifiers.
-    { type: 'AWS_SECRET_KEY', pattern: /[Aa][Ww][Ss][\w\-.]{0,24}(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee])[\w\-.]{0,24}["'\s]*[:=]\s*["']?([A-Za-z0-9/+]{40})\b/g, group: 1 },
-    { type: 'GCP_API_KEY', pattern: /\bAIza[0-9A-Za-z\-_]{35}\b/g },
-    { type: 'SLACK_TOKEN', pattern: /\bxox[abposr]-[A-Za-z0-9-]{10,}\b|https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/]{20,}/g },
-    { type: 'SENDGRID_KEY', pattern: /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g },
-    { type: 'NPM_TOKEN', pattern: /\bnpm_[A-Za-z0-9]{36}\b/g },
-    { type: 'KEEPPLAIN_TOKEN', pattern: /\b(?:kp|ct)_[A-Za-z0-9]{48}\b/g },
+    { type: 'AWS_SECRET_KEY', pattern: /[Aa][Ww][Ss][\w\-.]{0,24}(?:[Ss][Ee][Cc][Rr][Ee][Tt]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee])[\w\-.]{0,24}[\\"'\s]*[:=]\s*(?:\\*["'])?([A-Za-z0-9/+]{40})(?![\w/+])/g, group: 1 },
+    { type: 'GCP_API_KEY', pattern: /(?:\b|(?<=\\[nrt]))AIza[0-9A-Za-z\-_]{35}\b/g },
+    { type: 'SLACK_TOKEN', pattern: /(?:\b|(?<=\\[nrt]))xox[abposr]-[A-Za-z0-9-]{10,}\b|https:\/\/hooks\.slack\.com\/services\/[A-Za-z0-9/]{20,}/g },
+    { type: 'SENDGRID_KEY', pattern: /(?:\b|(?<=\\[nrt]))SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/g },
+    { type: 'NPM_TOKEN', pattern: /(?:\b|(?<=\\[nrt]))npm_[A-Za-z0-9]{36}\b/g },
+    { type: 'KEEPPLAIN_TOKEN', pattern: /(?:\b|(?<=\\[nrt]))(?:kp|ct)_[A-Za-z0-9]{48}\b/g },
     { type: 'SIGNED_URL', pattern: /\bX-(?:Amz|Goog)-(?:Credential|Signature|Security-Token)=([^\s&"'<>]+)/g, group: 1 },
-    { type: 'JWT', pattern: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
-    { type: 'DATABASE_URL', pattern: /\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|sqlserver):\/\/[^\s:@/"'[\]]*:[^\s@/"'[\]]+@[^\s"'<>]*[^\s"'<>.,;:)\]]/gi },
-    { type: 'URL_PASSWORD', pattern: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/"'[\]]+:([^\s@/"'[\]]+)@/gi, group: 1 },
-    { type: 'SECRET_ASSIGNMENT', pattern: /\b[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|AUTH_KEY)[A-Z0-9_]*["']?\s*[:=]\s*["']?([^\s"'#,;]{8,})/g, group: 1 },
+    { type: 'JWT', pattern: /(?:(?<![A-Za-z0-9_\-.\\])|(?<=\\[nrt]))eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
+    { type: 'DATABASE_URL', pattern: /(?:\b|(?<=\\[nrt]))(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|sqlserver):\/\/[^\s:@/"'[\]]*:[^\s@/"'[\]]+@[^\s"'<>]*[^\s"'<>.,;:)\]]/gi },
+    { type: 'URL_PASSWORD', pattern: /(?:\b|(?<=\\[nrt]))[a-z][a-z0-9+.-]{0,30}:\/\/[^\s:@/"'[\]]+:([^\s@/"'[\]]+)@/gi, group: 1 },
+    // A tool call's input is a JSON string here: a quote comes escaped (\"), and a value ends at \n, \r or \t as it does at
+    // a real line break (or it takes the lines after it, and one "example" among them made the whole of it a
+    // placeholder). A doubled backslash is a backslash of the value itself. How long a value must be: MIN_VALUE.
+    // Between quotes the value runs to the closing one: a password may have a space, a #, a comma or a semicolon in it,
+    // where a value with no quotes ends (a # , ; stays in that one only with more of the value right after it).
+    { type: 'SECRET_ASSIGNMENT', pattern: /(?:\b|(?<=\\[nrt]))[A-Z0-9_]{0,64}(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY|AUTH_KEY)[A-Z0-9_]{0,64}(?:\\*["'])?\s*[:=]\s*(?:\\*"([^"\\\s]*(?:(?:[ \t]|\\\\|\\(?=[^\s"\\nrt]))[^"\\\s]*)*)\\?"|\\*'([^'\\\s]*(?:(?:[ \t]|\\\\|\\(?=[^\s'\\nrt]))[^'\\\s]*)*)\\?'|(?:\\*["'])?((?:[^\s"'#,;\\]+|[#,;](?=[^\s"'\\])|\\\\|\\(?=[^\s"'\\nrt]))*))/g, group: [1, 2, 3] },
     // The user part of scheme://user@host is not an address: the first branch takes it whole and it is left as it is.
-    { type: 'EMAIL', pattern: /(\b[a-z][a-z0-9+.-]*:\/\/[^\s@/"']*@)|\b[A-Za-z0-9._%+-]+@(?!(?:example|test|localhost)\.)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b/g, severity: 'warning', skip: 1 },
+    // The address starts where PHP's \b[A-Za-z0-9._%+-]+@ starts it, at the first letter, digit or _ of its run, but is
+    // tried there only: V8 tried \b at every hyphen and dot of a long run and read the rest of it each time. The look
+    // back over the run's first dots and hyphens is made at a letter only, or a page of hyphens is read back from each.
+    { type: 'EMAIL', pattern: /(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s@/"']*@)|(?=[A-Za-z0-9_])(?<=(?<![A-Za-z0-9._%+-])[.%+-]*)[A-Za-z0-9_][A-Za-z0-9._%+-]*@(?!(?:example|test|localhost)\.)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b/g, severity: 'warning', skip: 1 },
     { type: 'IP_ADDRESS', pattern: /\b(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])\b/g, severity: 'warning' },
     // A company's own network: an address in a URL or after user@, or anything under .corp / .intranet.
-    { type: 'INTERNAL_HOST', pattern: /(?<=:\/\/|@)(?:[A-Za-z0-9-]+\.)+(?:internal|corp|intranet|lan|local|localdomain)\b|\b(?:[A-Za-z0-9-]+\.)+(?:corp|intranet|svc\.cluster\.local)\b/g, severity: 'warning' },
+    { type: 'INTERNAL_HOST', pattern: /(?<=:\/\/|@)(?:[A-Za-z0-9-]+\.){1,20}(?:internal|corp|intranet|lan|local|localdomain)\b|(?:(?<![A-Za-z0-9_\-.\\])|(?<=\\[nrt]))(?:[A-Za-z0-9-]+\.){1,20}(?:corp|intranet|svc\.cluster\.local)\b/g, severity: 'warning' },
     // The Claude account and its organization, by id: they name the person like an address does. Both when they come
     // as a pair, one after the other in a path.
     { type: 'ACCOUNT_ID', pattern: new RegExp(`(?:${ACCOUNT_PLACE})(${UUID}(?:${SEP}${UUID})?)`, 'g'), group: 1, severity: 'warning' },
@@ -69,6 +87,11 @@ const RULES = [
 const IGNORED_VALUES = new Set(['changeme', 'password', 'xxxxxxxx', 'your-secret-here', 'secret', 'null', 'undefined']);
 const PLACEHOLDER = /example|placeholder|dummy|x{6,}|\*{4,}|\.{3}|…|^<.*>$/i;
 const REFERENCE = /^(?:[$%{(<[]|process\.env|os\.environ|env\(|getenv|config\(|secrets\.)/i;
+/** ${VAR:-value}: a reference that holds a value after all, the one used when the variable is not set. */
+const DEFAULTED = /^\$\{\w+:?[-=+]([^}]{8,})\}?$/;
+const MIN_VALUE = 8;
+/** A value with spaces made of words alone is a sentence ("Enter your password"), not a secret. */
+const SENTENCE = /^(?=.*\s)[A-Za-z\s.,!?:'-]+$/;
 const IGNORED_EMAIL = /^(?:git|[^@]*no-?reply)@|@users\.noreply\./i;
 /**
  * A home folder names the person: C:\Users\ann, /Users/ann, /home/ann become ~, and each counts in `paths`. Only
@@ -133,6 +156,10 @@ function isPublicIp(ip) {
         return false;
     return true;
 }
+/** The part of a match that is the secret: the match itself, or the default inside ${VAR:-default}. */
+function held(type, value) {
+    return (type === 'SECRET_ASSIGNMENT' && DEFAULTED.exec(value)?.[1]) || value;
+}
 function isNotASecret(type, value) {
     if (IGNORED_VALUES.has(value.toLowerCase()) || PLACEHOLDER.test(value))
         return true;
@@ -140,6 +167,9 @@ function isNotASecret(type, value) {
         return !isPublicIp(value);
     if (type === 'EMAIL')
         return IGNORED_EMAIL.test(value);
+    // KEY=value shorter than MIN_VALUE is a flag or a word; so is a reference, or a short plain word like ct_wrong.
+    if (type === 'SECRET_ASSIGNMENT' && ([...value].length < MIN_VALUE || SENTENCE.test(value)))
+        return true;
     if (type === 'SECRET_ASSIGNMENT' || type === 'URL_PASSWORD')
         return REFERENCE.test(value) || (value.length < 16 && /^[a-z_-]+$/.test(value));
     return false;
@@ -206,7 +236,9 @@ export class PrivacyScan {
                 const whole = m[0];
                 if (rule.skip && m[rule.skip] !== undefined)
                     return whole;
-                const value = m[rule.group ?? 0] ?? '';
+                // The capture that holds the secret; where a rule has several ways to read it, the one that matched.
+                const captured = [rule.group ?? 0].flat().map((g) => m[g]).find((v) => v) ?? '';
+                const value = held(rule.type, captured);
                 if (value === '' || value.includes('[REDACTED:') || (rule.type !== 'TERM' && isNotASecret(rule.type, value)))
                     return whole;
                 const kept = this.record(rule.type, rule.severity ?? 'secret', value);

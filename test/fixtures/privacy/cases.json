@@ -277,9 +277,10 @@
     {
         "name": "json with escapes",
         "text_base64": "eyJjb250ZW50IjoiREJfUEFTU1dPUkQ9WGsyOTxmYWtlPmZMcTc8ZmFrZT5WcDNtWnc4MVxuQVBQX1VSTD1odHRwOi8vc2hvcC5sb2NhbCJ9",
-        "redacted_base64": "eyJjb250ZW50IjoiREJfUEFTU1dPUkQ9W1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXSJ9",
+        "redacted_base64": "eyJjb250ZW50IjoiREJfUEFTU1dPUkQ9W1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXVxuQVBQX1VSTD1odHRwOi8vW1JFREFDVEVEOklOVEVSTkFMX0hPU1RdIn0=",
         "types": [
-            "SECRET_ASSIGNMENT"
+            "SECRET_ASSIGNMENT",
+            "INTERNAL_HOST"
         ]
     },
     {
@@ -363,5 +364,243 @@
         "types": [
             "EMAIL"
         ]
+    },
+    {
+        "name": "json tool input, quoted value",
+        "text_base64": "eyJjb21tYW5kIjoiZXhwb3J0IERCX1BBU1NXT1JEPVwiWGsyOTxmYWtlPmZMcTc8ZmFrZT5WcDNtWnc4MVwiICYmIHBocCBhcnRpc2FuIG1pZ3JhdGUifQ==",
+        "redacted_base64": "eyJjb21tYW5kIjoiZXhwb3J0IERCX1BBU1NXT1JEPVwiW1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXVwiICYmIHBocCBhcnRpc2FuIG1pZ3JhdGUifQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json file written, quoted name and value",
+        "text_base64": "eyJjb250ZW50Ijoie1xuICBcIkpXVF9TRUNSRVRcIjogXCJoN0drPGZha2U+MnBRejlMbVg8ZmFrZT40dkJuXCJcbn0ifQ==",
+        "redacted_base64": "eyJjb250ZW50Ijoie1xuICBcIkpXVF9TRUNSRVRcIjogXCJbUkVEQUNURUQ6U0VDUkVUX0FTU0lHTk1FTlRdXCJcbn0ifQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json tool input, quoted references",
+        "text_base64": "eyJjb21tYW5kIjoiZXhwb3J0IEFQSV9UT0tFTj1cIiQoY2F0IH4vLnRva2VuKVwiIERCX1BBU1NXT1JEPVwiJHtEQl9QQVNTfVwiIn0=",
+        "redacted_base64": "eyJjb21tYW5kIjoiZXhwb3J0IEFQSV9UT0tFTj1cIiQoY2F0IH4vLnRva2VuKVwiIERCX1BBU1NXT1JEPVwiJHtEQl9QQVNTfVwiIn0=",
+        "types": []
+    },
+    {
+        "name": "aws secret key in a tool input",
+        "text_base64": "eyJjb250ZW50IjoiYXdzX3NlY3JldF9hY2Nlc3Nfa2V5ID0gXCJacTNWPGZha2U+dDhMci9OeTVXcDJLczlIZDxmYWtlPitKZjRHYjdNYzFYYTZVZTBRbzNUXCIifQ==",
+        "redacted_base64": "eyJjb250ZW50IjoiYXdzX3NlY3JldF9hY2Nlc3Nfa2V5ID0gXCJbUkVEQUNURUQ6QVdTX1NFQ1JFVF9LRVldXCIifQ==",
+        "types": [
+            "AWS_SECRET_KEY"
+        ]
+    },
+    {
+        "name": "aws secret key ending in a slash",
+        "text_base64": "YXdzX3NlY3JldF9hY2Nlc3Nfa2V5ID0gWnEzVjxmYWtlPnQ4THIvTnk1V3AyS3M5SGQ8ZmFrZT4rSmY0R2I3TWMxWGE2VWUwUW8zLw==",
+        "redacted_base64": "YXdzX3NlY3JldF9hY2Nlc3Nfa2V5ID0gW1JFREFDVEVEOkFXU19TRUNSRVRfS0VZXQ==",
+        "types": [
+            "AWS_SECRET_KEY"
+        ]
+    },
+    {
+        "name": "private key cut before its end",
+        "text_base64": "JCBjYXQgZGVwbG95LnBlbQotLS0tPGZha2U+LUJFR0lOIFJTQSA8ZmFrZT5QUklWQVRFIEtFWS0tLS0tCk1JSUU8ZmFrZT5wQUlCQUFLQ0FRRUEwWjNWUzVKSmNkczM8ZmFrZT54Zm4veWdXeUY4UGJuR3kwQUhCN01hRndFcE4zazFRQUFBQUEKTUlJRTxmYWtlPnBBSUJBQUtDQVFFQTBaM1ZTNUpKY2RzMzxmYWtlPnhmbi95Z1d5RjhQYm5HeTBBSEI3TWFGd0VwTjNrMlFBQUFBQQpNSUlFPGZha2U+cEFJQkFBS0NBUUVBMFozVlM1SkpjZHMzPGZha2U+eGZuL3lnV3lGOFBibkd5MEFIQjdNYUZ3RXBOM2szUUFBQUFBCuKApiAyNCBtb3JlIGxpbmVz",
+        "redacted_base64": "JCBjYXQgZGVwbG95LnBlbQpbUkVEQUNURUQ6UFJJVkFURV9LRVldCuKApiAyNCBtb3JlIGxpbmVz",
+        "types": [
+            "PRIVATE_KEY"
+        ]
+    },
+    {
+        "name": "private key cut, in a json string",
+        "text_base64": "eyJzdGRvdXQiOiJkYXRhOlxuICB0bHMua2V5OiB8XG4gICAgLS0tLTxmYWtlPi1CRUdJTiBSU0EgPGZha2U+UFJJVkFURSBLRVktLS0tLVxuICAgIE1JSUU8ZmFrZT5wQUlCQUFLQ0FRRUEwWjNWUzVKSmNkczM8ZmFrZT54Zm4veWdXeUY4UGJuR3kwQUhCN01hRndFcE4zazFRQUFBQUFcbiAgICBNSUlFPGZha2U+cEFJQkFBS0NBUUVBMFozVlM1SkpjZHMzPGZha2U+eGZuL3lnV3lGOFBibkd5MEFIQjdNYUZ3RXBOM2syUUFBQUFBXG7igKYgMzAgbW9yZSBsaW5lcyJ9",
+        "redacted_base64": "eyJzdGRvdXQiOiJkYXRhOlxuICB0bHMua2V5OiB8XG4gICAgW1JFREFDVEVEOlBSSVZBVEVfS0VZXVxu4oCmIDMwIG1vcmUgbGluZXMifQ==",
+        "types": [
+            "PRIVATE_KEY"
+        ]
+    },
+    {
+        "name": "private key marker in a sentence",
+        "text_base64": "VGhlIGZpbGUgbXVzdCBzdGFydCB3aXRoIC0tLS0tQkVHSU4gUFJJVkFURSBLRVktLS0tLSBhbmQgaG9sZCB0aGUga2V5IGluIGJhc2U2NCBhZnRlciBpdC4=",
+        "redacted_base64": "VGhlIGZpbGUgbXVzdCBzdGFydCB3aXRoIC0tLS0tQkVHSU4gUFJJVkFURSBLRVktLS0tLSBhbmQgaG9sZCB0aGUga2V5IGluIGJhc2U2NCBhZnRlciBpdC4=",
+        "types": []
+    },
+    {
+        "name": "json file written, password on a later line",
+        "text_base64": "eyJmaWxlX3BhdGgiOiJkZXBsb3kvYXBwLmNvbmYiLCJjb250ZW50IjoiREJfSE9TVD1kYlxuREJfUEFTU1dPUkQ9WGsyOTxmYWtlPmZMcTc8ZmFrZT5WcDNtWnc4MVxuTUFJTF9GUk9NPWhlbGxvQGV4YW1wbGUuY29tXG4ifQ==",
+        "redacted_base64": "eyJmaWxlX3BhdGgiOiJkZXBsb3kvYXBwLmNvbmYiLCJjb250ZW50IjoiREJfSE9TVD1kYlxuREJfUEFTU1dPUkQ9W1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXVxuTUFJTF9GUk9NPWhlbGxvQGV4YW1wbGUuY29tXG4ifQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json file written, a reference then a password",
+        "text_base64": "eyJjb250ZW50IjoiQVBJX1RPS0VOPSR7VE9LRU59XG5EQl9QQVNTV09SRD1YazI5PGZha2U+ZkxxNzxmYWtlPlZwM21adzgxXG4ifQ==",
+        "redacted_base64": "eyJjb250ZW50IjoiQVBJX1RPS0VOPSR7VE9LRU59XG5EQl9QQVNTV09SRD1bUkVEQUNURUQ6U0VDUkVUX0FTU0lHTk1FTlRdXG4ifQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json file written, a key then a password",
+        "text_base64": "eyJjb250ZW50IjoiU1RSSVBFX1NFQ1JFVD1za19sPGZha2U+aXZlXzUxSDh4WXpBPGZha2U+YkNkRWZHaElqS2xNbk9wUXJcbkRCX1BBU1NXT1JEPVhrMjk8ZmFrZT5mTHE3PGZha2U+VnAzbVp3ODFcbiJ9",
+        "redacted_base64": "eyJjb250ZW50IjoiU1RSSVBFX1NFQ1JFVD1bUkVEQUNURUQ6U1RSSVBFX0tFWV1cbkRCX1BBU1NXT1JEPVtSRURBQ1RFRDpTRUNSRVRfQVNTSUdOTUVOVF1cbiJ9",
+        "types": [
+            "STRIPE_KEY",
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json edit, a key then an example address",
+        "text_base64": "eyJmaWxlX3BhdGgiOiJjb25maWcvc2V0dGluZ3MuaW5pIiwibmV3X3N0cmluZyI6IkFQSV9LRVk9OWY4YTxmYWtlPjdiNmM1ZDRlPGZha2U+M2YyYTFiMGM5ZDhlXG5BUElfVVJMPWh0dHBzOi8vYXBpLmV4YW1wbGUuY29tL3YxXG4ifQ==",
+        "redacted_base64": "eyJmaWxlX3BhdGgiOiJjb25maWcvc2V0dGluZ3MuaW5pIiwibmV3X3N0cmluZyI6IkFQSV9LRVk9W1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXVxuQVBJX1VSTD1odHRwczovL2FwaS5leGFtcGxlLmNvbS92MVxuIn0=",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json file written, a token opening a line",
+        "text_base64": "eyJjb250ZW50IjoiIyBkZXBsb3kgdG9rZW5cbmdocF88ZmFrZT4xNkM3ZTQyRjI5MmM2OTEyRTc3PGZha2U+MTBjODM4MzQ3QWUxNzhCNGFcbkFLSUE8ZmFrZT4yRTBBOEY8ZmFrZT4zQjI0NEM5OTg2XG4ifQ==",
+        "redacted_base64": "eyJjb250ZW50IjoiIyBkZXBsb3kgdG9rZW5cbltSRURBQ1RFRDpHSVRIVUJfVE9LRU5dXG5bUkVEQUNURUQ6QVdTX0FDQ0VTU19LRVldXG4ifQ==",
+        "types": [
+            "GITHUB_TOKEN",
+            "AWS_ACCESS_KEY"
+        ]
+    },
+    {
+        "name": "json file written, a password with a backslash",
+        "text_base64": "eyJjb250ZW50IjoiREJfUEFTU1dPUkQ9WGsyOTxmYWtlPmZMXFxucTc8ZmFrZT5WcDNtWnc4MVxuTkVYVD0xXG4ifQ==",
+        "redacted_base64": "eyJjb250ZW50IjoiREJfUEFTU1dPUkQ9W1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXVxuTkVYVD0xXG4ifQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "reference with a default value",
+        "text_base64": "REJfUEFTU1dPUkQ9JHtEQl9QQVNTV09SRDotWGsyOTxmYWtlPmZMcTc8ZmFrZT5WcDNtWnc4MX0=",
+        "redacted_base64": "REJfUEFTU1dPUkQ9JHtEQl9QQVNTV09SRDotW1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXX0=",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "reference with a default reference",
+        "text_base64": "REJfUEFTU1dPUkQ9JHtEQl9QQVNTV09SRDotJEZBTExCQUNLX1BBU1N9",
+        "redacted_base64": "REJfUEFTU1dPUkQ9JHtEQl9QQVNTV09SRDotJEZBTExCQUNLX1BBU1N9",
+        "types": []
+    },
+    {
+        "name": "private key cut, in a diff",
+        "text_base64": "LS0tIGEvZGVwbG95LnBlbQorKysgL2Rldi9udWxsCi0tLS0tPGZha2U+LUJFR0lOIFJTQSA8ZmFrZT5QUklWQVRFIEtFWS0tLS0tCi1NSUlFPGZha2U+cEFJQkFBS0NBUUVBMFozVlM1SkpjZHMzPGZha2U+eGZuL3lnV3lGOFBibkd5MEFIQjdNYUZ3RXBOM2sxUUFBQUFBCi1NSUlFPGZha2U+cEFJQkFBS0NBUUVBMFozVlM1SkpjZHMzPGZha2U+eGZuL3lnV3lGOFBibkd5MEFIQjdNYUZ3RXBOM2syUUFBQUFBCuKApiAyNCBtb3JlIGxpbmVz",
+        "redacted_base64": "LS0tIGEvZGVwbG95LnBlbQorKysgL2Rldi9udWxsCi1bUkVEQUNURUQ6UFJJVkFURV9LRVldCuKApiAyNCBtb3JlIGxpbmVz",
+        "types": [
+            "PRIVATE_KEY"
+        ]
+    },
+    {
+        "name": "private key cut, numbered lines",
+        "text_base64": "ICAgICAx4oaSLS0tLTxmYWtlPi1CRUdJTiBSU0EgPGZha2U+UFJJVkFURSBLRVktLS0tLQogICAgIDLihpJNSUlFPGZha2U+cEFJQkFBS0NBUUVBMFozVlM1SkpjZHMzPGZha2U+eGZuL3lnV3lGOFBibkd5MEFIQjdNYUZ3RXBOM2sxUUFBQUFBCiAgICAgM+KGkk1JSUU8ZmFrZT5wQUlCQUFLQ0FRRUEwWjNWUzVKSmNkczM8ZmFrZT54Zm4veWdXeUY4UGJuR3kwQUhCN01hRndFcE4zazJRQUFBQUEK4oCmIDI0IG1vcmUgbGluZXM=",
+        "redacted_base64": "ICAgICAx4oaSW1JFREFDVEVEOlBSSVZBVEVfS0VZXQrigKYgMjQgbW9yZSBsaW5lcw==",
+        "types": [
+            "PRIVATE_KEY"
+        ]
+    },
+    {
+        "name": "private key cut, grep -n",
+        "text_base64": "ZGVwbG95LnNoOjEyOi0tLS08ZmFrZT4tQkVHSU4gUlNBIDxmYWtlPlBSSVZBVEUgS0VZLS0tLS0KZGVwbG95LnNoOjEzOk1JSUU8ZmFrZT5wQUlCQUFLQ0FRRUEwWjNWUzVKSmNkczM8ZmFrZT54Zm4veWdXeUY4UGJuR3kwQUhCN01hRndFcE4zazFRQUFBQUEKZGVwbG95LnNoOjE0Ok1JSUU8ZmFrZT5wQUlCQUFLQ0FRRUEwWjNWUzVKSmNkczM8ZmFrZT54Zm4veWdXeUY4UGJuR3kwQUhCN01hRndFcE4zazJRQUFBQUEK4oCmIDI0IG1vcmUgbGluZXM=",
+        "redacted_base64": "ZGVwbG95LnNoOjEyOltSRURBQ1RFRDpQUklWQVRFX0tFWV0K4oCmIDI0IG1vcmUgbGluZXM=",
+        "types": [
+            "PRIVATE_KEY"
+        ]
+    },
+    {
+        "name": "quoted value with a hash",
+        "text_base64": "REJfUEFTU1dPUkQ9ImFCMyM8ZmFrZT54WTkha0xtMjxmYWtlPiRRdzgi",
+        "redacted_base64": "REJfUEFTU1dPUkQ9IltSRURBQ1RFRDpTRUNSRVRfQVNTSUdOTUVOVF0i",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "quoted value with spaces",
+        "text_base64": "REJfUEFTU1dPUkQ9IlRyMHViNCA8ZmFrZT5kb3ImMyA8ZmFrZT5ob3JzZTk5Ig==",
+        "redacted_base64": "REJfUEFTU1dPUkQ9IltSRURBQ1RFRDpTRUNSRVRfQVNTSUdOTUVOVF0i",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "single-quoted value with a semicolon",
+        "text_base64": "UEFTU1dPUkQ9J3BAc3MgPGZha2U+dzByZDsgPGZha2U+ZHJvcDknCk5FWFQ9MQ==",
+        "redacted_base64": "UEFTU1dPUkQ9J1tSRURBQ1RFRDpTRUNSRVRfQVNTSUdOTUVOVF0nCk5FWFQ9MQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "value with a semicolon, no quotes",
+        "text_base64": "U01UUF9QQVNTV09SRD1hQjM7PGZha2U+eFk5a0xtMjxmYWtlPlF3OHp6VDc=",
+        "redacted_base64": "U01UUF9QQVNTV09SRD1bUkVEQUNURUQ6U0VDUkVUX0FTU0lHTk1FTlRd",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "value with a comma, no quotes",
+        "text_base64": "REJfUEFTU1dPUkQ9YUIzeFk5PGZha2U+a0xtMiw8ZmFrZT5Rdzh6elQ3IG5leHQ=",
+        "redacted_base64": "REJfUEFTU1dPUkQ9W1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXSBuZXh0",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "value before a comment",
+        "text_base64": "QVBJX1RPS0VOPWFiYzxmYWtlPjEyMzxmYWtlPjQ1Nnh5eiAjIHJvdGF0ZSBtb250aGx5",
+        "redacted_base64": "QVBJX1RPS0VOPVtSRURBQ1RFRDpTRUNSRVRfQVNTSUdOTUVOVF0gIyByb3RhdGUgbW9udGhseQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "value before a statement end",
+        "text_base64": "QVBJX0tFWT1hYmM8ZmFrZT4xMjM8ZmFrZT40NTZ4eXo7",
+        "redacted_base64": "QVBJX0tFWT1bUkVEQUNURUQ6U0VDUkVUX0FTU0lHTk1FTlRdOw==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json tool input, quoted value with spaces",
+        "text_base64": "eyJjb21tYW5kIjoiZXhwb3J0IERCX1BBU1NXT1JEPVwiYUIzIzxmYWtlPnhZIDlrTG0yPGZha2U+XCIgJiYgcGhwIGFydGlzYW4gbWlncmF0ZSJ9",
+        "redacted_base64": "eyJjb21tYW5kIjoiZXhwb3J0IERCX1BBU1NXT1JEPVwiW1JFREFDVEVEOlNFQ1JFVF9BU1NJR05NRU5UXVwiICYmIHBocCBhcnRpc2FuIG1pZ3JhdGUifQ==",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "json file written, quoted value with a comma",
+        "text_base64": "eyJjb250ZW50Ijoie1xuICBcIkpXVF9TRUNSRVRcIjogXCJoN0drIDxmYWtlPjJwUXo5OzxmYWtlPkxtWCw0dkJuXCIsXG4gIFwiUE9SVFwiOiA4MDgwXG59In0=",
+        "redacted_base64": "eyJjb250ZW50Ijoie1xuICBcIkpXVF9TRUNSRVRcIjogXCJbUkVEQUNURUQ6U0VDUkVUX0FTU0lHTk1FTlRdXCIsXG4gIFwiUE9SVFwiOiA4MDgwXG59In0=",
+        "types": [
+            "SECRET_ASSIGNMENT"
+        ]
+    },
+    {
+        "name": "a sentence between quotes",
+        "text_base64": "UEFTU1dPUkRfSElOVCA9ICJFbnRlciB5b3VyIHBhc3N3b3JkIg==",
+        "redacted_base64": "UEFTU1dPUkRfSElOVCA9ICJFbnRlciB5b3VyIHBhc3N3b3JkIg==",
+        "types": []
+    },
+    {
+        "name": "a call with arguments",
+        "text_base64": "Y29uc3QgQVBJX0tFWSA9IGZvbyhhLCBiKTs=",
+        "redacted_base64": "Y29uc3QgQVBJX0tFWSA9IGZvbyhhLCBiKTs=",
+        "types": []
+    },
+    {
+        "name": "quoted reference",
+        "text_base64": "REJfUEFTU1dPUkQ9IiR7REJfUEFTU30iIE9USEVSPSJ4IHki",
+        "redacted_base64": "REJfUEFTU1dPUkQ9IiR7REJfUEFTU30iIE9USEVSPSJ4IHki",
+        "types": []
     }
 ]
