@@ -28,6 +28,7 @@ import { join, resolve } from 'node:path';
 import { agentArgs } from './agent.mjs';
 import { inBackground, sessionAutoMode } from './auto.mjs';
 import { home } from './credentials.mjs';
+import { required } from './programs.mjs';
 import { sessionEdits } from './edits.mjs';
 import { shCommand } from './plugin.mjs';
 import { agentOfSession, rolloutCwd, sentAt } from './sessions.mjs';
@@ -43,7 +44,7 @@ const MAX_COMMITS = 500;
 
 function git(cwd, args, { input = null, timeout = 5000 } = {}) {
     try {
-        return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', input: input ?? undefined, stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'ignore'], timeout, windowsHide: true }).replace(/\n$/, '');
+        return execFileSync(required('git'), ['-C', cwd, ...args], { encoding: 'utf8', input: input ?? undefined, stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'ignore'], timeout, windowsHide: true }).replace(/\n$/, '');
     } catch {
         return null;
     }

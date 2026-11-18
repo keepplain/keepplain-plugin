@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
+import { required } from './programs.mjs';
 
 export const MAX_SUBJECTS = 20;
 // More hashes than titles: the site matches a team repository's commits to the session by them (KeepPlain plan, stage 12.1).
@@ -17,7 +18,7 @@ export const MAX_COMMIT_FILES = 100;
 
 function git(cwd, args) {
     try {
-        return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
+        return execFileSync(required('git'), ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
     } catch {
         return null;
     }

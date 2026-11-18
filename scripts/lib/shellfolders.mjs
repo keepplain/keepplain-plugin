@@ -33,6 +33,7 @@
  * its title or its printed hash, so a bare hash would be of no use there and only tell of someone else's work.
  */
 import { execFileSync } from 'node:child_process';
+import { required } from './programs.mjs';
 import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, posix, win32 } from 'node:path';
@@ -547,7 +548,7 @@ function isDirectory(dir) {
 /** The root of the repository $dir is in, as git names it (forward slashes, Windows too), or null. */
 function topLevel(dir) {
     try {
-        return execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim() || null;
+        return execFileSync(required('git'), ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim() || null;
     } catch {
         return null;
     }

@@ -11,6 +11,7 @@
  *   ~/.keepplain/handoff/<agent>-<id>.md the brief, for `codex "$(cat …)"`
  */
 import { spawnSync } from 'node:child_process';
+import { program as find, required } from './programs.mjs';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -192,7 +193,8 @@ export function copyToClipboard(text, platform = process.platform) {
     const tools = platform === 'win32' ? [['powershell', ['-NoProfile', '-Command', '$input | Set-Clipboard']], ['clip', []]] : platform === 'darwin' ? [['pbcopy', []]] : [['wl-copy', []], ['xclip', ['-selection', 'clipboard']], ['xsel', ['--clipboard', '--input']]];
     for (const [program, args] of tools) {
         try {
-            const run = spawnSync(program, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 5000, windowsHide: true });
+            // Not installed: the next one.
+            const run = spawnSync(required(program), args, { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 5000, windowsHide: true });
             if (run.status === 0) return true;
         } catch {
             // not installed
@@ -220,16 +222,18 @@ export function openTerminal(target, file, cwd, platform = process.platform) {
     const env = terminalEnv();
     try {
         if (platform === 'win32') {
-            const run = spawnSync('cmd', ['/c', 'start', '""', 'powershell', '-NoExit', '-Command', `Set-Location '${cwd.replace(/'/g, "''")}'; ${command}`], { stdio: 'ignore', windowsHide: true, timeout: 5000, env });
+            // cmd.exe looks in the current folder first as well: powershell goes by its full path too.
+            const run = spawnSync(required('cmd'), ['/c', 'start', '""', required('powershell'), '-NoExit', '-Command', `Set-Location '${cwd.replace(/'/g, "''")}'; ${command}`], { stdio: 'ignore', windowsHide: true, timeout: 5000, env });
             return run.status === 0;
         }
         const shell = `cd '${cwd.replace(/'/g, `'\\''`)}' && ${command}`;
         if (platform === 'darwin') {
             const script = `tell application "Terminal" to do script "${shell.replace(/[\\"]/g, '\\$&')}"`;
-            return spawnSync('osascript', ['-e', script], { stdio: 'ignore', timeout: 5000, env }).status === 0;
+            return spawnSync(required('osascript'), ['-e', script], { stdio: 'ignore', timeout: 5000, env }).status === 0;
         }
         for (const [program, args] of [['x-terminal-emulator', ['-e']], ['gnome-terminal', ['--']], ['konsole', ['-e']], ['xterm', ['-e']]]) {
-            const run = spawnSync(program, [...args, 'sh', '-c', shell], { stdio: 'ignore', timeout: 5000, detached: true, env });
+            if (!find(program)) continue;
+            const run = spawnSync(required(program), [...args, 'sh', '-c', shell], { stdio: 'ignore', timeout: 5000, detached: true, env });
             if (run.status === 0) return true;
         }
     } catch {
@@ -250,7 +254,7 @@ export function writeBrief(agent, id, text, dir = home()) {
 
 const git = (cwd, args) => {
     try {
-        const run = spawnSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, windowsHide: true });
+        const run = spawnSync(required('git'), args, { cwd, encoding: 'utf8', timeout: 5000, windowsHide: true });
         return run.status === 0 ? run.stdout.trim() : null;
     } catch {
         return null;

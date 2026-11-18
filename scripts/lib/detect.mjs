@@ -13,25 +13,14 @@
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { join } from 'node:path';
 import { geminiHome, SURFACES } from './antigravity.mjs';
 import { cursorHome } from './cursor.mjs';
 import { piHome } from './pi.mjs';
 import { codexHome, configDir } from './session.mjs';
+import { findProgram } from './programs.mjs';
 
-/** The full path of a program in PATH, or null. On Windows with PATHEXT (claude.exe, claude.cmd from npm). */
-export function findProgram(name, env = process.env, platform = process.platform) {
-    const dirs = (env.PATH ?? env.Path ?? '').split(platform === 'win32' ? ';' : delimiter).filter(Boolean);
-    const exts = platform === 'win32' ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
-    for (const dir of dirs) {
-        for (const ext of exts) {
-            const path = join(dir, name + ext.toLowerCase());
-            if (existsSync(path)) return path;
-        }
-    }
-
-    return null;
-}
+export { findProgram };
 
 /** The Cursor CLI where its installer puts it, when it is not in PATH (yet): %LOCALAPPDATA%\\cursor-agent, or ~/.local/bin. */
 function cursorAgentCli(env) {
