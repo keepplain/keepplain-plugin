@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
+import { required } from './programs.mjs';
 
 export const MAX_SUBJECTS = 20;
 // More hashes than titles: the site matches a team repository's commits to the session by them (KeepPlain plan, stage 12.1).
@@ -17,7 +18,7 @@ export const MAX_COMMIT_FILES = 100;
 
 function git(cwd, args) {
     try {
-        return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
+        return execFileSync(required('git'), ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
     } catch {
         return null;
     }
@@ -71,11 +72,39 @@ export function repositoryRoot(cwd) {
  * https://github.com/{owner}/{repo} for any GitHub form of the origin address (https, ssh, scp-like, with or without
  * .git or credentials); null for every other host, which the site does not link to.
  */
-export function normalizeRemote(url) {
+export function normalizeRemote(url, hostOf = sshHostName) {
     if (!url) return null;
-    const match = url.trim().match(/^(?:(?:https?|ssh|git):\/\/)?(?:[^@/\s]+@)?(?:www\.)?github\.com[:/]+([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
+    const address = url.trim();
+    // github.com by the names it goes under: www., ssh over port 443 (ssh.github.com), a port, an ssh alias like github.com-work.
+    const match = address.match(/^(?:(?:https?|ssh|git):\/\/)?(?:[^@/\s]+@)?(?:www\.|ssh\.)?github\.com(?:-[A-Za-z0-9_-]+)?(?::\d+)?[:/]+([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
+    if (match) return `https://github.com/${match[1]}/${match[2]}`;
+    // Any other name ssh is told to reach GitHub by (Host in ~/.ssh/config): ssh itself says where it leads.
+    const aliased = address.match(/^(?:ssh:\/\/)?(?:[^@/\s]+@)?([A-Za-z0-9][A-Za-z0-9_.-]*)(?::\d+)?[:/]+([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i);
+    if (!aliased || /^[a-z]:$/i.test(address.slice(0, 2)) || /^(?!ssh:)[a-z+]+:\/\//i.test(address) || !(/github/i.test(aliased[1]) || !aliased[1].includes('.'))) return null;
 
-    return match ? `https://github.com/${match[1]}/${match[2]}` : null;
+    return /^(?:ssh\.)?github\.com$/i.test(hostOf(aliased[1]) ?? '') ? `https://github.com/${aliased[2]}/${aliased[3]}` : null;
+}
+
+const sshHosts = new Map();
+
+/**
+ * The host ssh reaches under this name, as its configuration says (`ssh -G` reads the configuration and connects to
+ * nothing); null when ssh is not here or does not say. Asked once per name.
+ */
+export function sshHostName(alias) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(alias)) return null;
+    if (!sshHosts.has(alias)) {
+        let host = null;
+        try {
+            const said = execFileSync(required('ssh'), ['-G', alias], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+            host = said.match(/^hostname\s+(\S+)\s*$/im)?.[1] ?? null;
+        } catch {
+            // no ssh here, or it does not say
+        }
+        sshHosts.set(alias, host);
+    }
+
+    return sshHosts.get(alias);
 }
 
 /**

@@ -19,6 +19,7 @@
  * by itself.
  */
 import { spawnSync } from 'node:child_process';
+import { program } from './programs.mjs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
@@ -52,8 +53,9 @@ export function agentOf(value) {
 
 /** The repository the folder is in, or the folder itself outside one: where agents look for skills and rules. */
 export function projectRoot(cwd) {
-    const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', windowsHide: true });
-    const top = r.status === 0 ? r.stdout.trim() : '';
+    const git = program('git');
+    const r = git ? spawnSync(git, ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', windowsHide: true }) : null;
+    const top = r?.status === 0 ? r.stdout.trim() : '';
 
     return top ? join(top) : cwd;
 }

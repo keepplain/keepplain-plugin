@@ -17,6 +17,7 @@ import { chmodSync, copyFileSync, existsSync, readdirSync, readFileSync, renameS
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { privateDir, writePrivate } from './credentials.mjs';
+import { required } from './programs.mjs';
 import { SESSION_ID } from './session.mjs';
 import { gitFileChange } from './slim.mjs';
 
@@ -44,7 +45,7 @@ export function snapshotDir(env = process.env) {
 
 function git(cwd, args, { env = process.env, input = null, timeout = BUDGET_MS, maxBuffer = 16 * 1024 * 1024 } = {}) {
     try {
-        return execFileSync('git', ['-C', cwd, '-c', 'core.quotePath=false', ...args], {
+        return execFileSync(required('git'), ['-C', cwd, '-c', 'core.quotePath=false', ...args], {
             encoding: 'utf8',
             env,
             input: input ?? undefined,

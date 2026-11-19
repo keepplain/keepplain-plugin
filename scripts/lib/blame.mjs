@@ -6,6 +6,7 @@
  * this computer. The terminal gets the code with a gutter of agent and session, --json the same for the desktop app.
  */
 import { execFile } from 'node:child_process';
+import { required } from './programs.mjs';
 import { existsSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -78,7 +79,7 @@ export function parsePorcelain(text) {
 /** One git command in $cwd; its output, or a Failure-like Error with git's own words. */
 async function git(cwd, args, timeoutMs = 60_000) {
     try {
-        const { stdout } = await run('git', ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+        const { stdout } = await run(required('git'), ['-c', 'core.quotePath=false', ...args], { cwd, encoding: 'utf8', timeout: timeoutMs, maxBuffer: 256 * 1024 * 1024, windowsHide: true });
 
         return stdout;
     } catch (e) {

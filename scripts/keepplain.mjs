@@ -110,6 +110,7 @@ import { Failure } from './lib/failure.mjs';
 import { fileRepository, folderGitContexts, gitContext, normalizeRemote, projectOf, repositoryRoot, worktrees } from './lib/git.mjs';
 import { AGENT_IDS, AGENTS, agentArgs, agentId, commandIn, hasPluginOptions } from './lib/agent.mjs';
 import { detectAgents } from './lib/detect.mjs';
+import { program } from './lib/programs.mjs';
 import { EDITION, editionRuns, notInThisCopy } from './lib/edition.mjs';
 import { AGENTS as USE_AGENTS, FORMATS as USE_FORMATS, agentOf, buildSlug, findBlock, lineDiff, projectRoot, readUses, recordUse, ruleTarget, shown, skillName, withBlock, writeText } from './lib/playbooks.mjs';
 import { proxyFor, request } from './lib/http.mjs';
@@ -1508,7 +1509,7 @@ async function shareReadme(kit) {
         console.log(`Written: ${name}. Nothing is committed: commit it when you are ready.`);
     }
 
-    const origin = normalizeRemote(spawnSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', windowsHide: true }).stdout ?? '');
+    const origin = originOf(root);
     const repo = kit.repo ?? origin;
     if (repo) await api('POST', '/api/v1/share/attachments', json({ build: kit.slug, target: 'readme', url: repo })).catch(() => null);
 }
@@ -1535,7 +1536,7 @@ async function shareAuto() {
     const root = repositoryRoot(option('cwd') || process.cwd());
     if (!token || !root) return;
     try {
-        const origin = normalizeRemote(spawnSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', windowsHide: true }).stdout ?? '');
+        const origin = originOf(root);
         if (!origin) return markShareChecked(site, root, undefined);
         const pending = await api('GET', `/api/v1/share/pending?repo=${encodeURIComponent(origin)}`, undefined, true, 10_000);
         markShareChecked(site, root, Boolean(pending.auto_pr));
@@ -2556,10 +2557,20 @@ function revealFile(file) {
     else launch('xdg-open', [dirname(file)]);
 }
 
+/** The repository's origin as the site names it, or null: no git, no repository, no origin. */
+function originOf(root) {
+    const git = program('git');
+
+    return git ? normalizeRemote(spawnSync(git, ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', windowsHide: true }).stdout ?? '') : null;
+}
+
 function launch(cmd, cmdArgs, options = {}) {
     if (env.KEEPPLAIN_NO_BROWSER) return;
+    // By its full path, never a bare name (lib/programs.mjs).
+    const path = program(cmd);
+    if (!path) return;
     try {
-        spawn(cmd, cmdArgs, { detached: true, stdio: 'ignore', windowsHide: true, ...options }).on('error', () => {}).unref();
+        spawn(path, cmdArgs, { detached: true, stdio: 'ignore', windowsHide: true, ...options }).on('error', () => {}).unref();
     } catch {
         // The link and the path are printed anyway.
     }
