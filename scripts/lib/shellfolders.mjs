@@ -192,10 +192,15 @@ function walkedArgv(argv, state, options, sink, id) {
  */
 export function subjectOf(command) {
     if (typeof command !== 'string') return '';
-    let subject;
+    // Only what follows `git … commit` is the commit's: an -m before it is another program's (python -m pytest && git commit -m "…").
+    const at = command.match(/\bgit(?:\.exe)?\b[^\n;&|]{0,200}?\scommit\b/i);
+    if (at) command = command.slice(at.index + at[0].length);
+    let subject = null;
     const m = command.match(/(?:^|\s)(?:-[a-zA-Z]*m|--message)(?:=|\s*)(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+))/u);
     if (m) subject = m[1] !== undefined ? m[1].replace(/\\(.)/g, (_, c) => ({ n: '\n', t: '\t', r: '\r' })[c] ?? c) : (m[2] ?? m[3]);
-    else {
+    // -m "$(cat <<'EOF' …": the message is what the heredoc holds, not the command that reads it.
+    if (subject !== null && /^["']?\$\(\s*cat\b[^\n]*<</.test(subject)) subject = null;
+    if (subject === null) {
         const h = command.match(/(?:<<-?\s*(["']?)\w+\1[^\n]*|@["'])\n\s*([^\n]*\S[^\n]*)/u);
         if (!h) return '';
         subject = h[2];

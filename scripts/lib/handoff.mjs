@@ -179,22 +179,44 @@ export function handoffTargets(current, env = process.env) {
 /** How each agent is started with a first message: Antigravity takes it after -i, to stay open after it. */
 const CLI_NAMES = { 'claude-code': 'claude', codex: 'codex', pi: 'pi', cursor: 'cursor-agent', antigravity: 'agy -i' };
 
-/** The shell line that starts the target with the brief as its first message. Null for a target with no CLI (Cursor's IDE). */
+/** The first message on Windows: one line without quotes that names the brief's file, last, so a path with spaces reads whole. */
+export const briefPointer = (file) => `Continue the work another agent session handed off. Its brief is a file on this computer; read it first: ${file}`;
+
+/**
+ * The shell line that starts the target with the brief as its first message. Null for a target with no CLI (Cursor's
+ * IDE). On Windows (a PowerShell line) the first message names the brief's file instead of carrying it: a message of
+ * many lines does not get through there. An agent installed by npm starts through a .cmd file, and cmd.exe ends its
+ * arguments at the first line break; Windows PowerShell 5.1 hands a program its argument with the quotes inside it
+ * unescaped, so the brief came apart at each of them.
+ */
 export function startCommand(target, file, platform = process.platform) {
     const cli = CLI_NAMES[target.id] ?? target.id;
     if (target.cli === null) return null;
-    if (platform === 'win32') return `${cli} (Get-Content -Raw '${file.replace(/'/g, "''")}')`;
+    if (platform === 'win32') return `${cli} '${briefPointer(file).replace(/'/g, "''")}'`;
 
     return `${cli} "$(cat '${file.replace(/'/g, `'\\''`)}')"`;
 }
 
+/** PowerShell reads what it is given as UTF-8 (by itself it takes the console's code page, and everything but ASCII comes out wrong). */
+export const POWERSHELL_COPY = '[Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false; Set-Clipboard -Value ([Console]::In.ReadToEnd())';
+
+/**
+ * What takes the clipboard on this system, in the order tried: [program, arguments, what it is given]. Windows' clip
+ * reads the console's code page as well, unless the text is UTF-16 with its mark.
+ */
+export function clipboardTools(text, platform = process.platform) {
+    if (platform === 'win32') return [['powershell', ['-NoProfile', '-Command', POWERSHELL_COPY], text], ['clip', [], Buffer.from(`\ufeff${text}`, 'utf16le')]];
+    if (platform === 'darwin') return [['pbcopy', [], text]];
+
+    return [['wl-copy', [], text], ['xclip', ['-selection', 'clipboard'], text], ['xsel', ['--clipboard', '--input'], text]];
+}
+
 /** Puts the text on the clipboard with whatever the system has; false when nothing took it. */
 export function copyToClipboard(text, platform = process.platform) {
-    const tools = platform === 'win32' ? [['powershell', ['-NoProfile', '-Command', '$input | Set-Clipboard']], ['clip', []]] : platform === 'darwin' ? [['pbcopy', []]] : [['wl-copy', []], ['xclip', ['-selection', 'clipboard']], ['xsel', ['--clipboard', '--input']]];
-    for (const [program, args] of tools) {
+    for (const [program, args, input] of clipboardTools(text, platform)) {
         try {
             // Not installed: the next one.
-            const run = spawnSync(required(program), args, { input: text, stdio: ['pipe', 'ignore', 'ignore'], timeout: 5000, windowsHide: true });
+            const run = spawnSync(required(program), args, { input, stdio: ['pipe', 'ignore', 'ignore'], timeout: 5000, windowsHide: true });
             if (run.status === 0) return true;
         } catch {
             // not installed

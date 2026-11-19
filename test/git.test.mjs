@@ -15,6 +15,23 @@ test('only GitHub remotes become a link, in one form', () => {
     }
     assert.equal(normalizeRemote('git@gitlab.com:mara/shop.git'), null);
     assert.equal(normalizeRemote('https://github.com.evil.io/mara/shop'), null);
+    // GitHub under its other names: ssh over port 443, a port, an alias of the usual form.
+    const asked = [];
+    const hostOf = (alias) => (asked.push(alias), { work: 'github.com', gh443: 'ssh.github.com', lab: 'gitlab.com' })[alias] ?? null;
+    for (const url of ['ssh://git@ssh.github.com:443/mara/shop.git', 'ssh://git@github.com:22/mara/shop', 'git@github.com-work:mara/shop.git', 'git@ssh.github.com:mara/shop']) {
+        assert.equal(normalizeRemote(url, hostOf), 'https://github.com/mara/shop', url);
+    }
+    assert.deepEqual(asked, [], 'ssh is not asked about a name that says GitHub itself');
+    // Any other alias: ssh's configuration says where it leads.
+    assert.equal(normalizeRemote('git@work:mara/shop.git', hostOf), 'https://github.com/mara/shop');
+    assert.equal(normalizeRemote('ssh://git@gh443/mara/shop', hostOf), 'https://github.com/mara/shop');
+    assert.equal(normalizeRemote('git@lab:mara/shop.git', hostOf), null);
+    assert.equal(normalizeRemote('git@unknown:mara/shop.git', hostOf), null);
+    asked.length = 0;
+    for (const url of ['git@gitlab.com:mara/shop.git', 'C:/mara/shop', 'https://gitlab/mara', '-oProxyCommand=calc:mara/shop', '/srv/git/mara/shop.git', 'file:///srv/mara/shop']) {
+        assert.equal(normalizeRemote(url, hostOf), null, url);
+    }
+    assert.deepEqual(asked, [], 'ssh is asked only about an ssh address whose host could be an alias');
     assert.equal(normalizeRemote(null), null);
 });
 

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { buildBrief, codexLimits, handoffDue, handoffMessage, handoffOn, handoffThreshold, nearLimit, setHandoff, startCommand, terminalEnv, windowLabel } from '../scripts/lib/handoff.mjs';
+import { briefPointer, buildBrief, clipboardTools, codexLimits, handoffDue, handoffMessage, handoffOn, handoffThreshold, nearLimit, POWERSHELL_COPY, setHandoff, startCommand, terminalEnv, windowLabel } from '../scripts/lib/handoff.mjs';
 import { codexShowsMessages, keepUnsaid, showsMessages, takeUnsaid, unsaidContext } from '../scripts/lib/unsaid.mjs';
 import { coders, hookCommand } from './helpers.mjs';
 
@@ -85,8 +85,34 @@ test('the message names the limit and every target with its command', () => {
 test('the start command puts the brief first, for a shell and for PowerShell', () => {
     const codex = { id: 'codex', name: 'Codex', cli: 'codex' };
     assert.equal(startCommand(codex, '/home/you/.keepplain/handoff/claude-code-s1.md', 'linux'), `codex "$(cat '/home/you/.keepplain/handoff/claude-code-s1.md')"`);
-    assert.equal(startCommand({ id: 'claude-code', name: 'Claude Code', cli: 'claude' }, 'C:\\Users\\you\\.keepplain\\handoff\\codex-t1.md', 'win32'), `claude (Get-Content -Raw 'C:\\Users\\you\\.keepplain\\handoff\\codex-t1.md')`);
     assert.equal(startCommand({ id: 'cursor', name: 'Cursor', cli: null }, '/x.md', 'linux'), null, 'the IDE alone takes no first message');
+});
+
+test('on Windows the first message is one line that names the brief\'s file: nothing a command line there would break', () => {
+    const claude = { id: 'claude-code', name: 'Claude Code', cli: 'claude' };
+    const file = 'C:\\Users\\Mara O\'Neil\\.keepplain\\handoff\\codex-t1.md';
+    const command = startCommand(claude, file, 'win32');
+
+    assert.equal(command, "claude 'Continue the work another agent session handed off. Its brief is a file on this computer; read it first: C:\\Users\\Mara O''Neil\\.keepplain\\handoff\\codex-t1.md'");
+    // No line break (cmd.exe ends a .cmd's arguments there) and no double quote (PowerShell 5.1 does not escape them).
+    assert.doesNotMatch(command, /[\r\n"]/);
+    assert.ok(briefPointer(file).endsWith(file), 'the path comes last, so one with spaces reads whole');
+    assert.equal(startCommand({ id: 'antigravity', name: 'Antigravity', cli: 'agy' }, 'C:\\b.md', 'win32'), "agy -i 'Continue the work another agent session handed off. Its brief is a file on this computer; read it first: C:\\b.md'");
+});
+
+test('the clipboard on Windows is given text it reads as written, not in the console\'s code page', () => {
+    const text = 'Перенос — «дальше»…\nline two';
+    const [[shell, args, sent], [clip, , wide]] = clipboardTools(text, 'win32');
+
+    assert.equal(shell, 'powershell');
+    assert.equal(sent, text);
+    assert.equal(args.at(-1), POWERSHELL_COPY);
+    assert.match(POWERSHELL_COPY, /InputEncoding = New-Object System\.Text\.UTF8Encoding/);
+    assert.doesNotMatch(POWERSHELL_COPY, /\$input/, 'read through $input, the text is decoded before the encoding is set');
+    assert.equal(clip, 'clip');
+    assert.deepEqual([...wide.subarray(0, 2)], [0xff, 0xfe], 'clip takes UTF-16 by its mark');
+    assert.equal(wide.subarray(2).toString('utf16le'), text);
+    assert.deepEqual(clipboardTools(text, 'darwin'), [['pbcopy', [], text]]);
 });
 
 test('the brief of a Claude Code session: the task, the files, the commands, where it stopped', async () => {

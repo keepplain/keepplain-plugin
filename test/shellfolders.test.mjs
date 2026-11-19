@@ -162,6 +162,16 @@ test('the title a git commit command gives, as the site reads it', () => {
     assert.equal(subjectOf('git commit -F msg.txt'), '');
 });
 
+test('the title is the commit\'s own: not the command that reads a heredoc, not another program\'s -m', () => {
+    // The form Claude Code commits with.
+    assert.equal(subjectOf('git commit -m "$(cat <<\'EOF\'\nfix: raise the limit\n\nWhy it was low.\n\nCo-Authored-By: Someone <s@example.com>\nEOF\n)"'), 'fix: raise the limit');
+    assert.equal(subjectOf('git add -A && git commit -m "$(cat <<EOF\n  Indented title\nEOF\n)"'), 'Indented title');
+    assert.equal(subjectOf('python -m pytest -q && git commit -m "Fix the tests"'), 'Fix the tests');
+    assert.equal(subjectOf('python -m pytest -q; git -c user.name=ci commit -am \'Fix the tests\''), 'Fix the tests');
+    assert.equal(subjectOf('python -m pytest && git commit --amend --no-edit'), '', 'pytest is not a title');
+    assert.equal(subjectOf('git commit -m "First" && python -m build'), 'First');
+});
+
 test('Codex and Pi: what git printed in a call\'s output names the agent\'s commit', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-shell-'));
     const item = (payload) => ({ timestamp: '2026-09-01T10:00:00.000Z', type: 'response_item', payload });
