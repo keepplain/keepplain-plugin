@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/slimSession.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:785f4317b0e559cb1f16a5ff09c824e5d4a9255765958348b6977b3a7e064e66
+// sha256:60585b63923767ce2a2313d287b1848a168cce039eea434c4aba96f75ae9a1a2
 
 /**
  * Claude Code and Codex sessions are mostly weight nobody reads: screenshots as base64, whole files
@@ -47,13 +47,21 @@ export const LIBRARY_MARKER = '[library call — not kept]';
  * Codex patch), and its input too unless the file is named by a path key.
  */
 export const WITHHELD_MARKER = '[content not shown, the file may hold secrets]';
+/**
+ * The first `length` units of the text, one less when that would end between the two halves of a character outside the
+ * basic plane (an emoji): half of one is not text, and the server drops a line that holds it.
+ */
+function clip(text, length) {
+    const last = text.charCodeAt(length - 1);
+    return text.slice(0, last >= 0xd800 && last <= 0xdbff ? length - 1 : length);
+}
 function cut(value, lines = TOOL_LINES) {
     const text = typeof value === 'string' ? value : JSON.stringify(value ?? '');
     const all = text.split('\n');
     // Cut before (the plugin's lines, slimmed again on the server): the count of what was cut stays.
     const done = all.length === lines + 1 && /^… \d+ more lines$/.test(all[lines]);
     const kept = all.length > lines && !done ? `${all.slice(0, lines).join('\n')}\n… ${all.length - lines} more lines` : text;
-    return kept.length > TOOL_CHARS ? `${kept.slice(0, TOOL_CHARS)}…` : kept;
+    return kept.length > TOOL_CHARS ? `${clip(kept, TOOL_CHARS)}…` : kept;
 }
 function blockText(value) {
     if (!Array.isArray(value))
@@ -333,7 +341,7 @@ function fileChange(file, op, lines, ctx, from) {
         return change;
     const all = lines.join('\n');
     const kept = lines.length > CHANGE_LINES ? lines.slice(0, CHANGE_LINES).join('\n') : all;
-    change.diff = kept.length > CHANGE_CHARS ? kept.slice(0, CHANGE_CHARS) : kept;
+    change.diff = kept.length > CHANGE_CHARS ? clip(kept, CHANGE_CHARS) : kept;
     if (change.diff.length < all.length)
         change.truncated = true;
     return change;
