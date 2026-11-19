@@ -94,13 +94,16 @@ export const register: Register = (on) => {
         };
 
         return (
-            <Box flexDirection="column" paddingX={1} gap={0}>
-                <Text>
-                    <Text bold>KeepPlain</Text>
-                    <Text dimColor> · </Text>
-                    Claude's {LABELS[hit.kind] ?? hit.kind} limit is {hit.percentUsed}% used{resets}. Continue in another agent with a brief of this session:
-                </Text>
-                <Box gap={1}>
+            <Box flexDirection="column" paddingX={1} paddingY={0} gap={1}>
+                <Box flexDirection="column" flexShrink={0}>
+                    <Text wrap="wrap">
+                        <Text bold>KeepPlain</Text>
+                        <Text dimColor> · </Text>
+                        Claude's {LABELS[hit.kind] ?? hit.kind} limit is {hit.percentUsed}% used{resets}.
+                    </Text>
+                    <Text wrap="wrap">Continue in another agent with a brief of this session:</Text>
+                </Box>
+                <Box gap={1} flexWrap="wrap" flexShrink={0}>
                     {targets.map((t, i) => (
                         <Button key={`to-${t.id}`} hotkey={String(i + 1)} variant={i === 0 ? 'primary' : 'secondary'} onPress={(press) => void hand($, t, press.surface).then(close)}>
                             {t.name}
@@ -110,7 +113,10 @@ export const register: Register = (on) => {
                         Not now
                     </Button>
                 </Box>
-                <Text dimColor>The brief goes to your clipboard with the command that starts the agent. Signed in, the next agent reads the whole session instead: /keepplain:resume.</Text>
+                <Box flexDirection="column" flexShrink={0}>
+                    <Text dimColor wrap="wrap">The brief goes to your clipboard with the command that starts the agent.</Text>
+                    <Text dimColor wrap="wrap">Signed in, the next agent reads the whole session instead: /keepplain:resume.</Text>
+                </Box>
             </Box>
         );
     });
