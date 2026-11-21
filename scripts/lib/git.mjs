@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
-import { required } from './programs.mjs';
+import { ranOutOfTime, required } from './programs.mjs';
 
 export const MAX_SUBJECTS = 20;
 // More hashes than titles: the site matches a team repository's commits to the session by them (KeepPlain plan, stage 12.1).
@@ -17,9 +17,13 @@ export const MAX_SHAS = 50;
 export const MAX_COMMIT_FILES = 100;
 
 function git(cwd, args) {
+    const began = Date.now();
     try {
         return execFileSync(required('git'), ['-C', cwd, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
-    } catch {
+    } catch (error) {
+        // Out of time, git in PATH may be a launcher on Windows: the git.exe it started is stopped with it.
+        ranOutOfTime(error, began);
+
         return null;
     }
 }
@@ -95,11 +99,13 @@ export function sshHostName(alias) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(alias)) return null;
     if (!sshHosts.has(alias)) {
         let host = null;
+        const began = Date.now();
         try {
             const said = execFileSync(required('ssh'), ['-G', alias], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
             host = said.match(/^hostname\s+(\S+)\s*$/im)?.[1] ?? null;
-        } catch {
-            // no ssh here, or it does not say
+        } catch (error) {
+            // no ssh here, or it does not say; out of time, what a launcher of it started is stopped as well
+            ranOutOfTime(error, began);
         }
         sshHosts.set(alias, host);
     }

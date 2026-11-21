@@ -8,6 +8,8 @@
  *   Cursor       ~/.cursor/projects/<the folder>/agent-transcripts/<id>/<id>.jsonl (lib/cursor.mjs)
  *   Antigravity  ~/.gemini/<surface>/brain/<id>/.system_generated/logs/transcript_full.jsonl, whatever the folder: the hooks
  *                note which folder it ran in (lib/antigravity.mjs)
+ *   the others   wherever the agent keeps them, read into ~/.keepplain/readers/<agent>/<id>.jsonl as the lines Claude
+ *                Code writes (lib/readers)
  *
  * A folder inside a repository also finds the sessions run at the repository's top. What was sent is remembered in
  * ~/.keepplain/sent.json (the send step; SENT_DAYS, then forgotten) and in auto mode's auto-sessions.json.
@@ -21,6 +23,7 @@ import { projectOf, repositoryRoot, worktrees } from './git.mjs';
 import { antigravitySessions, describeAntigravity, findAntigravityTranscript, readAntigravityNotes, transcriptCwd } from './antigravity.mjs';
 import { cursorSessions, describeCursor, findCursorTranscript } from './cursor.mjs';
 import { describePi, findPiSession, piSessions } from './pi.mjs';
+import { readerAgents, readerPath, readerSessions, reads } from './readers/index.mjs';
 import { codexHome, configDir, findRollout, findTranscript, isCodexPrompt, promptText, rolloutFiles, transcriptHead, transcriptStream } from './session.mjs';
 
 const CODEX_DAYS = 30;
@@ -35,13 +38,14 @@ const normal = (path) => resolve(path).replace(/[\\/]+$/, '');
 /**
  * Every agent's sessions of $folder, newest first: [{agent, id, path, mtimeMs}]. In a repository, those of its whole
  * project (grouping plan, 23.1): the main working tree and every worktree, also Claude Code's .claude/worktrees/*
- * already removed, whichever of them the command runs in.
+ * already removed, whichever of them the command runs in. $readers: false leaves out the agents read through a reader
+ * (lib/readers), for a caller that looks for one agent's sessions: some of them are listed by running the agent's command.
  */
-export function folderSessions(folder, { env = process.env, now = Date.now() } = {}) {
+export function folderSessions(folder, { env = process.env, now = Date.now(), readers = true } = {}) {
     const root = projectOf(folder)?.root ?? repositoryRoot(folder);
     const folders = [...new Set([folder, repositoryRoot(folder), root, ...worktrees(root)].filter(Boolean).map(normal))];
     const removed = root ? join(normal(root), '.claude', 'worktrees') : null;
-    const found = [...claudeSessions(folders, configDir(env), removed), ...codexSessions(folders, codexHome(env), now, removed), ...piSessions(folders, env), ...cursorSessions(folders, env), ...antigravitySessions(folders, env)];
+    const found = [...claudeSessions(folders, configDir(env), removed), ...codexSessions(folders, codexHome(env), now, removed), ...piSessions(folders, env), ...cursorSessions(folders, env), ...antigravitySessions(folders, env), ...(readers ? readerSessions(folders, env) : [])];
     // A Codex thread reverted has several rollouts: the newest stands for it.
     const newest = new Map();
     for (const s of found.sort((a, b) => b.mtimeMs - a.mtimeMs)) if (!newest.has(`${s.agent}:${s.id}`)) newest.set(`${s.agent}:${s.id}`, s);
@@ -55,7 +59,7 @@ export function folderSessions(folder, { env = process.env, now = Date.now() } =
  */
 export function allSessions({ env = process.env, now = Date.now(), days = CODEX_DAYS } = {}) {
     const since = now - days * 86_400_000;
-    const found = [...claudeSessions(null, configDir(env), null), ...codexSessions(null, codexHome(env), now, null, days), ...piSessions(null, env), ...cursorSessions(null, env), ...antigravitySessions(null, env)].filter((s) => s.mtimeMs >= since);
+    const found = [...claudeSessions(null, configDir(env), null), ...codexSessions(null, codexHome(env), now, null, days), ...piSessions(null, env), ...cursorSessions(null, env), ...antigravitySessions(null, env), ...readerSessions(null, env, { since })].filter((s) => s.mtimeMs >= since);
     const newest = new Map();
     for (const s of found.sort((a, b) => b.mtimeMs - a.mtimeMs)) if (!newest.has(`${s.agent}:${s.id}`)) newest.set(`${s.agent}:${s.id}`, s);
 
@@ -90,13 +94,19 @@ export function sessionPath(agent, id, env = process.env, hint = null) {
     if (agent === 'pi') return findPiSession(id, env);
     if (agent === 'cursor') return findCursorTranscript(id, env, hint);
     if (agent === 'antigravity') return findAntigravityTranscript(id, env, hint);
+    if (reads(agent)) return readerPath(agent, id, env);
 
     return findTranscript(id, configDir(env));
 }
 
-/** Which agent ran the session with this id on this computer, or null. */
+/**
+ * Which agent ran the session with this id on this computer, or null. Of the agents read through a reader, only those
+ * on this computer are asked: a pre-push hook asks this of every id in the pushed commits' trailers, other people's too.
+ */
 export function agentOfSession(id, env = process.env) {
-    return ['claude-code', 'codex', 'pi', 'cursor', 'antigravity'].find((agent) => sessionPath(agent, id, env)) ?? null;
+    const read = readerAgents(env).filter((agent) => agent.present).map((agent) => agent.id);
+
+    return ['claude-code', 'codex', 'pi', 'cursor', 'antigravity', ...read].find((agent) => sessionPath(agent, id, env)) ?? null;
 }
 
 function claudeSessions(folders, dir, removed) {

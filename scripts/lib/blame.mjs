@@ -30,7 +30,7 @@ export const MAX_LINES = 10_000;
 /** Sessions on this computer a blame looks for by their trailer. */
 const MAX_LOCAL = 20;
 
-const SESSION_ID = /^[A-Za-z0-9-]{8,100}$/;
+const SESSION_ID = /^[A-Za-z0-9_-]{8,100}$/;
 const HEADER = /^([0-9a-f]{40}) (\d+) (\d+)(?: (\d+))?$/;
 
 /** The agents' colours in a terminal of 256 colours, as the site's /blame page paints them. */

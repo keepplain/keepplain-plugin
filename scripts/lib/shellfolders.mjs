@@ -39,6 +39,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, posix, win32 } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { transcriptChunks } from './session.mjs';
+import { reads } from './readers/index.mjs';
 import { agentOfSession, sessionCwd, sessionPath } from './sessions.mjs';
 
 /** As many folders as /add-dir gives a session (lib/git.mjs folderGitContexts): the shell's fill what the added ones leave. */
@@ -135,7 +136,8 @@ export function shellWorkFolders(agent, files, cwd = null, options = {}) {
  * git commit commands there gave (subjectOf), printed the short hashes git answered them with, in lower case.
  */
 export function shellWork(agent, files, cwd = null, options = {}) {
-    const read = READERS[agent];
+    // A session read through a reader (lib/readers) is in Claude Code's lines.
+    const read = READERS[agent] ?? (reads(agent) ? claudeShell : undefined);
     const found = new Map();
     // The folders of a git commit call by the call's id, until its result says what git printed.
     const pending = new Map();

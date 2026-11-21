@@ -19,6 +19,7 @@ import { closeSync, openSync, readdirSync, readSync, realpathSync } from 'node:f
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { cursorPrompt, readCursorSidecar } from './cursor.mjs';
+import { reads } from './readers/index.mjs';
 import { agentOfSession, sessionPath } from './sessions.mjs';
 
 const CHUNK = 1 << 20;
@@ -40,7 +41,8 @@ export function sessionEdits(id, root, env = process.env) {
         const agent = agentOfSession(id, env);
         const file = agent ? sessionPath(agent, id, env) : null;
         if (!file) return [];
-        if (agent === 'claude-code') return claudeEdits(file, root);
+        // A reader's file is written as Claude Code's lines (lib/readers).
+        if (agent === 'claude-code' || reads(agent)) return claudeEdits(file, root);
         if (agent === 'pi') return piEdits(file, root);
         if (agent === 'cursor') return cursorEdits(file, root, id, env);
         if (agent === 'antigravity') return antigravityEdits(file, root);

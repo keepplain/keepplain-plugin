@@ -8,17 +8,21 @@
  * Claude Code is the default: a command without --agent is one of Claude Code's, as it was before the others came.
  */
 
+import { READERS, reads } from './readers/index.mjs';
+
 export const AGENTS = {
     'claude-code': { id: 'claude-code', name: 'Claude Code', client: 'claude-plugin' },
     codex: { id: 'codex', name: 'Codex', client: 'codex-plugin' },
     cursor: { id: 'cursor', name: 'Cursor', client: 'cursor-plugin' },
     pi: { id: 'pi', name: 'Pi', client: 'pi-plugin' },
     antigravity: { id: 'antigravity', name: 'Antigravity', client: 'antigravity-plugin' },
+    // The agents whose sessions are read through a reader (lib/readers).
+    ...Object.fromEntries(Object.values(READERS).map((r) => [r.id, { id: r.id, name: r.name, client: `${r.id}-plugin` }])),
 };
 
 export const AGENT_IDS = Object.keys(AGENTS);
 
-/** claude, claude-code, codex, cursor, pi or antigravity as an agent id; null for anything else. */
+/** claude, claude-code, codex, cursor, pi, antigravity or a reader's agent as an agent id; null for anything else. */
 export function agentId(value) {
     const v = String(value ?? '').trim().toLowerCase();
 
@@ -31,6 +35,8 @@ export function agentId(value) {
  */
 export function commandIn(agent, name) {
     if (agent === 'codex') return `$keepplain:${name}`;
+    // A reader's agent has no command of the plugin's in it: the program is run in a terminal.
+    if (reads(agent)) return `keepplain ${name}`;
 
     return agent === 'cursor' || agent === 'antigravity' ? `/keepplain-${name}` : `/keepplain:${name}`;
 }

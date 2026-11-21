@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/slimSession.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:60585b63923767ce2a2313d287b1848a168cce039eea434c4aba96f75ae9a1a2
+// sha256:8dc236bc17a425e7166eea2dcd5e0840d0df2108c34b799e23015493aafe6b7a
 
 /**
  * Claude Code and Codex sessions are mostly weight nobody reads: screenshots as base64, whole files
@@ -375,7 +375,9 @@ function claudeChange(result, ctx) {
     for (const hunk of r.structuredPatch) {
         if (!hunk || !Array.isArray(hunk.lines))
             continue;
-        lines.push(`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`, ...hunk.lines.filter((l) => typeof l === 'string'));
+        // A hunk without line numbers (the plugin's readers write one for an agent whose edit says what changed, not where).
+        const where = typeof hunk.oldStart === 'number' && typeof hunk.newStart === 'number' ? `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@` : '@@ @@';
+        lines.push(where, ...hunk.lines.filter((l) => typeof l === 'string'));
     }
     return lines.length ? fileChange(r.filePath, 'update', lines, ctx) : null;
 }
