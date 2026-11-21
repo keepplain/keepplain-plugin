@@ -7,7 +7,7 @@
 // (by the agents that have a tool for it); a shell command that fails; the word "done".
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -349,8 +349,29 @@ test('the program itself lists a session an agent keeps and prepares it for send
         const { env } = install(agent);
         const run = (args) => {
             const [program, programArgs] = coders(args);
-
-            return execFileSync(program, programArgs, { env, cwd: env.KEEPPLAIN_USER_HOME, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+            const options = { env, cwd: env.KEEPPLAIN_USER_HOME, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+            try {
+                return execFileSync(program, programArgs, options);
+            } catch (error) {
+                if (error.code !== 'ENOENT') throw error;
+                const say = (...a) => console.log('DEBUG', ...a);
+                const cwd = options.cwd;
+                say('node', process.version, 'program', program, 'exists', existsSync(program));
+                say('cwd', JSON.stringify(cwd), 'exists', existsSync(cwd), 'dir', existsSync(cwd) && statSync(cwd).isDirectory());
+                try { say('cwd real', realpathSync.native(cwd)); } catch (e) { say('cwd real failed', e.code); }
+                const keys = Object.keys(env);
+                say('env keys', keys.length, 'bytes', keys.reduce((n, k) => n + k.length + String(env[k]).length + 2, 0), 'path-like', JSON.stringify(keys.filter((k) => /^path$/i.test(k))));
+                say('odd keys', JSON.stringify(keys.filter((k) => !/^[A-Za-z_][A-Za-z0-9_().]*$/.test(k) || env[k] === undefined || String(env[k]).includes('\\0'))));
+                say('long values', JSON.stringify(keys.filter((k) => String(env[k]).length > 2000).map((k) => [k, String(env[k]).length])));
+                const tryIt = (label, o) => { try { execFileSync(program, ['-e', '0'], { ...o, stdio: 'ignore' }); say(label, 'ok'); } catch (e) { say(label, 'fails', e.code); } };
+                tryIt('same', { env, cwd });
+                tryIt('no cwd', { env });
+                tryIt('process.env', { cwd });
+                tryIt('root cwd', { env, cwd: dirname(cwd) });
+                tryIt('tmp cwd', { env, cwd: tmpdir() });
+                for (const k of keys) { const e = { ...env }; delete e[k]; try { execFileSync(program, ['-e', '0'], { env: e, cwd, stdio: 'ignore' }); say('works without', k); } catch { } }
+                throw error;
+            }
         };
         const listed = JSON.parse(run(['sessions', '--all', '--json']));
         const mine = (listed.sessions ?? listed).filter((s) => s.agent === agent);
