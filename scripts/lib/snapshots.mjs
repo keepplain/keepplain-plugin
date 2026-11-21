@@ -17,11 +17,14 @@ import { chmodSync, copyFileSync, existsSync, readdirSync, readFileSync, renameS
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { privateDir, writePrivate } from './credentials.mjs';
-import { required } from './programs.mjs';
+import { ranOutOfTime, required } from './programs.mjs';
 import { SESSION_ID } from './session.mjs';
 import { gitFileChange } from './slim.mjs';
 
-/** A snapshot slower than this is a slow one; SLOW_IN_A_ROW of them turn snapshots off for the session. */
+/**
+ * A snapshot slower than this is a slow one; SLOW_IN_A_ROW of them turn snapshots off for the session. Each git command
+ * of a snapshot has this long as well: one that runs out of it is stopped and ends the snapshot (outOfBudget).
+ */
 export const BUDGET_MS = 3000;
 /**
  * The person should not wait on every prompt, but one slow snapshot is the machine busy for a moment (a test run, a
@@ -43,7 +46,9 @@ export function snapshotDir(env = process.env) {
     return join(env.KEEPPLAIN_HOME || join(homedir(), '.keepplain'), 'snapshots');
 }
 
-function git(cwd, args, { env = process.env, input = null, timeout = BUDGET_MS, maxBuffer = 16 * 1024 * 1024 } = {}) {
+/** onTimeout is called when the command ran out of its timeout: by then it is stopped, on Windows with all it started. */
+function git(cwd, args, { env = process.env, input = null, timeout = BUDGET_MS, maxBuffer = 16 * 1024 * 1024, onTimeout = null } = {}) {
+    const began = Date.now();
     try {
         return execFileSync(required('git'), ['-C', cwd, '-c', 'core.quotePath=false', ...args], {
             encoding: 'utf8',
@@ -54,7 +59,9 @@ function git(cwd, args, { env = process.env, input = null, timeout = BUDGET_MS, 
             maxBuffer,
             windowsHide: true,
         }).replace(/\n$/, '');
-    } catch {
+    } catch (error) {
+        if (ranOutOfTime(error, began)) onTimeout?.();
+
         return null;
     }
 }
@@ -86,8 +93,11 @@ export function takeSnapshot(event, kind, { dir = snapshotDir(), now = Date.now(
     if (state.disabled) return null;
 
     const began = Date.now();
-    const root = git(event.cwd, ['rev-parse', '--show-toplevel'], { timeout: budgetMs });
-    const gitDir = root && git(event.cwd, ['rev-parse', '--absolute-git-dir'], { timeout: budgetMs });
+    // A git command that ran out of the budget ends the snapshot there: the commands after it are not started.
+    let late = false;
+    const run = (cwd, args, options = {}) => (late ? null : git(cwd, args, { ...options, timeout: budgetMs, onTimeout: () => (late = true) }));
+    const root = run(event.cwd, ['rev-parse', '--show-toplevel']);
+    const gitDir = root && run(event.cwd, ['rev-parse', '--absolute-git-dir']);
     // Not a repository, or the session moved into another one: its snapshots would not compare.
     if (!root || !gitDir || (state.root && state.root !== root)) return null;
 
@@ -101,27 +111,32 @@ export function takeSnapshot(event, kind, { dir = snapshotDir(), now = Date.now(
     }
     const env = { ...process.env, ...IDENTITY, GIT_INDEX_FILE: index };
 
-    git(root, ['add', '-u', '--', '.'], { env, timeout: budgetMs });
-    const others = (git(root, ['ls-files', '--others', '--exclude-standard', '-z'], { env, timeout: budgetMs }) ?? '')
+    run(root, ['add', '-u', '--', '.'], { env });
+    const others = (run(root, ['ls-files', '--others', '--exclude-standard', '-z'], { env }) ?? '')
         .split('\0')
         .filter((f) => f && sizeOf(join(root, f)) <= MAX_NEW_FILE)
         .slice(0, MAX_NEW_FILES);
-    if (others.length) git(root, ['add', '--pathspec-from-file=-', '--pathspec-file-nul'], { env, input: others.join('\0'), timeout: budgetMs });
-    const tree = git(root, ['write-tree'], { env, timeout: budgetMs });
+    if (others.length) run(root, ['add', '--pathspec-from-file=-', '--pathspec-file-nul'], { env, input: others.join('\0') });
+    const tree = run(root, ['write-tree'], { env });
     // git writes the index with the umask's mode; the folder is private anyway (0700).
     try {
         chmodSync(index, 0o600);
     } catch {
         // Windows, or no index written.
     }
+    if (late) return outOfBudget(state, root, dir, budgetMs);
     if (!tree) return null;
 
-    const head = git(root, ['rev-parse', '--verify', '-q', 'HEAD'], { timeout: budgetMs });
+    const head = run(root, ['rev-parse', '--verify', '-q', 'HEAD']);
     const last = state.snapshots[state.snapshots.length - 1];
+    let commit = null;
     if (!last || last.tree !== tree) {
-        const commit = git(root, ['commit-tree', tree, '-m', `keepplain snapshot ${id}`, ...(state.commit ? ['-p', state.commit] : [])], { env, timeout: budgetMs });
-        if (commit && keepInReflog(root, `${REF}${id}`, commit, head, { env, timeout: budgetMs })) state.commit = commit;
+        commit = run(root, ['commit-tree', tree, '-m', `keepplain snapshot ${id}`, ...(state.commit ? ['-p', state.commit] : [])], { env });
+        if (commit && !keepInReflog(root, `${REF}${id}`, commit, head, { env, run })) commit = null;
     }
+    // The head may be the one that was not read: no entry without it either.
+    if (late) return outOfBudget(state, root, dir, budgetMs);
+    if (commit) state.commit = commit;
 
     const entry = { kind, at: new Date(now).toISOString(), tree, head };
     state.root = root;
@@ -139,11 +154,40 @@ export function takeSnapshot(event, kind, { dir = snapshotDir(), now = Date.now(
  * for 30 days at least (gc.reflogExpireUnreachable; snapshots go after 14), while `git log --all` walks only from HEAD, already in the person's history.
  * Without a HEAD yet (a repository with no commit) the ref stays on the snapshot.
  */
-function keepInReflog(root, ref, commit, head, options) {
-    if (git(root, ['update-ref', '--create-reflog', '-m', 'keepplain snapshot', ref, commit], options) === null) return false;
-    if (head) git(root, ['update-ref', '--create-reflog', '-m', 'keepplain snapshot', ref, head], options);
+function keepInReflog(root, ref, commit, head, { run = git, ...options } = {}) {
+    if (run(root, ['update-ref', '--create-reflog', '-m', 'keepplain snapshot', ref, commit], options) === null) return false;
+    if (head) run(root, ['update-ref', '--create-reflog', '-m', 'keepplain snapshot', ref, head], options);
 
     return true;
+}
+
+/**
+ * A git command of the snapshot ran out of the budget. Nothing is written for this turn: a tree without the files git
+ * had no time to list would show them all as added at the next snapshot that has them.
+ *
+ * It is a slow snapshot like any other, and SLOW_IN_A_ROW of them turn snapshots off, with one exception that goes at
+ * once: the person's home folder is in the repository (its root is the home folder, or above it). That is a home
+ * folder that is a repository (dotfiles, or a `git init` by mistake) around a session in some folder of it: listing its
+ * new files is reading the whole disk of the person, at every hook of every session, and what such a snapshot would
+ * hold is not the session's project. Any other repository, a big one whose package the session runs in among them, is
+ * slow for a moment (a cold disk, a busy machine) and keeps its three tries.
+ */
+function outOfBudget(state, root, dir, budgetMs) {
+    // Stopped on Windows, git has no moment to take its lock away, and the session's next snapshots would all fail on
+    // it. The index is this session's own and the git that held the lock is gone.
+    try {
+        rmSync(join(dir, `${state.session_id}.index.lock`), { force: true });
+    } catch {
+        // Still held: the next snapshot fails on it and is not written.
+    }
+    state.slow = (state.slow ?? 0) + 1;
+    // The home folder's repository, in git's own words, against the root git gave: no comparing of two spellings of a path.
+    const home = process.env.KEEPPLAIN_USER_HOME || homedir();
+    if (git(home, ['rev-parse', '--show-toplevel'], { timeout: budgetMs }) === root) state.disabled = 'outside';
+    else if (state.slow >= SLOW_IN_A_ROW) state.disabled = 'slow';
+    writeSnapshots(state, dir);
+
+    return null;
 }
 
 function sizeOf(path) {

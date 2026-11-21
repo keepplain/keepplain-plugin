@@ -28,7 +28,7 @@ import { join, resolve } from 'node:path';
 import { agentArgs } from './agent.mjs';
 import { inBackground, sessionAutoMode } from './auto.mjs';
 import { home } from './credentials.mjs';
-import { required } from './programs.mjs';
+import { ranOutOfTime, required } from './programs.mjs';
 import { sessionEdits } from './edits.mjs';
 import { shCommand } from './plugin.mjs';
 import { agentOfSession, rolloutCwd, sentAt } from './sessions.mjs';
@@ -43,9 +43,13 @@ const ZERO = /^0+$/;
 const MAX_COMMITS = 500;
 
 function git(cwd, args, { input = null, timeout = 5000 } = {}) {
+    const began = Date.now();
     try {
         return execFileSync(required('git'), ['-C', cwd, ...args], { encoding: 'utf8', input: input ?? undefined, stdio: [input === null ? 'ignore' : 'pipe', 'pipe', 'ignore'], timeout, windowsHide: true }).replace(/\n$/, '');
-    } catch {
+    } catch (error) {
+        // Out of time, git in PATH may be a launcher on Windows: the git.exe it started is stopped with it.
+        ranOutOfTime(error, began);
+
         return null;
     }
 }
