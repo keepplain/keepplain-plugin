@@ -18,6 +18,10 @@ if (!process.env.CT_TEST_ISOLATED) {
     process.env.PI_CODING_AGENT_SESSION_DIR ||= join(dir, 'pi-sessions');
     // Antigravity's ~/.gemini, where its surfaces keep their conversations (lib/antigravity.mjs).
     process.env.KEEPPLAIN_GEMINI_DIR ||= join(dir, 'gemini');
+    // The home folder as the readers of the other agents' sessions see it (lib/readers/home.mjs), and the variables
+    // by which an agent moves its folder or names its session.
+    process.env.KEEPPLAIN_USER_HOME ||= join(dir, 'home');
+    for (const name of ['GROK_HOME', 'GROK_SESSION_ID', 'COPILOT_HOME', 'COPILOT_AGENT_SESSION_ID', 'QWEN_HOME', 'QWEN_CODE_SESSION_ID', 'FACTORY_SESSION_ID', 'XDG_DATA_HOME', 'OPENCODE_DB', 'KILO_DB', 'AGENT_SESSION_ID', 'GOOSE_PATH_ROOT', 'CLINE_DIR', 'CLINE_DATA_DIR', 'VIBE_HOME', 'JUNIE_HOME', 'JUNIE_TMPDIR']) delete process.env[name];
     delete process.env.ANTIGRAVITY_CONVERSATION_ID;
     delete process.env.PI_SESSION_ID;
     delete process.env.PI_SESSION_FILE;

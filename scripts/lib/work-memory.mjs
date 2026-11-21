@@ -4,7 +4,7 @@ export function workContext(agent, project, env = process.env, explicitSession =
     const ids = { 'claude-code': env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID, codex: env.CODEX_THREAD_ID, pi: env.PI_SESSION_ID, antigravity: env.ANTIGRAVITY_CONVERSATION_ID };
     if (explicitSession && ids[agent] && explicitSession !== ids[agent]) throw new Error('The supplied id is not the current session.');
     const session = ids[agent] || explicitSession || null;
-    return { project_key: project?.key ?? null, client: ({'claude-code':'claude_plugin',codex:'codex_plugin',pi:'pi_plugin',cursor:'cursor_plugin',antigravity:'antigravity_plugin'})[agent], session_id: /^[A-Za-z0-9_.:-]{1,100}$/.test(session ?? '') ? session : null };
+    return { project_key: project?.key ?? null, client: ({'claude-code':'claude_plugin',codex:'codex_plugin',pi:'pi_plugin',cursor:'cursor_plugin',antigravity:'antigravity_plugin'})[agent] ?? `${String(agent).replace(/-/g, '_')}_plugin`, session_id: /^[A-Za-z0-9_.:-]{1,100}$/.test(session ?? '') ? session : null };
 }
 export function memoryArguments(tool, params, context) {
     if (tool === 'search_my_work' && params.scope !== 'all' && !params.project_id && !params.project_key && context.project_key) return {...params, project_key: context.project_key};

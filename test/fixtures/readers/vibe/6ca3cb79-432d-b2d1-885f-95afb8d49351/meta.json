@@ -1,0 +1,35 @@
+{
+  "session_id": "6ca3cb79-432d-b2d1-885f-95afb8d49351",
+  "parent_session_id": null,
+  "start_time": "2026-11-19T23:05:41.003000+00:00",
+  "end_time": "2026-11-19T23:05:54.520000+00:00",
+  "git_commit": null,
+  "git_branch": null,
+  "environment": {
+    "working_directory": "/home/agent/kp-capture/vibe"
+  },
+  "origin_directory": "/home/agent/kp-capture/vibe",
+  "username": "agent",
+  "child_sessions": [],
+  "loops": [],
+  "title": null,
+  "title_source": "auto",
+  "bumped_at": "2026-11-19T23:05:43.076357+00:00",
+  "pinned_at": null,
+  "archived_at": null,
+  "unseen_at": "2026-11-19T23:05:54.592476+00:00",
+  "seen_at": null,
+  "experiments": null,
+  "config": {
+    "active_model": "mock",
+    "model_name": "mock-model"
+  },
+  "runtime_path": "direct",
+  "import_provenance": null,
+  "created_worktree": null,
+  "project": null,
+  "artifacts": [],
+  "worktrees": [],
+  "owed_replies": [],
+  "skill_pins": []
+}

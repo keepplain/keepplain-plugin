@@ -50,6 +50,8 @@ import { claimShare } from '../limits/cli.mjs';
 import { nudgeDue, nudgeMessage, nudgeOn } from './nudge.mjs';
 import { projectRoot } from './playbooks.mjs';
 import { asksProvenance, provenanceContext } from './provenance.mjs';
+import { hookAnswer } from './readers/hooks.mjs';
+import { pruneReaders, READERS, readerEvent, readerPath, reads } from './readers/index.mjs';
 import { SESSION_ID } from './session.mjs';
 import { sessionPath } from './sessions.mjs';
 import { pruneSidecars, writeSidecar } from './sidecar.mjs';
@@ -78,7 +80,65 @@ export { readEvent };
  * runs alongside.
  */
 export async function runHook(agent, name, options = {}) {
+    if (reads(agent)) return readerHook(agent, name, options);
+
     return agent === 'antigravity' ? antigravityHook(name, options) : dispatch(agent, name, options);
+}
+
+/**
+ * A hook of an agent served through a reader (lib/readers): the agent's own event is read under the plugin's names
+ * (readerEvent), and the session's file is the reader's, written anew for the events that send the session: the end
+ * of a turn, a tool's end, the end of the session. The start and a prompt only need the folder and the session's id.
+ * What the shared hooks print is not printed as it is: each of these agents takes text for the model in its own shape,
+ * at its own events, or not at all (lib/readers/hooks.mjs, hookAnswer). Whatever goes wrong, nothing is printed and
+ * the agent's session goes on.
+ *
+ * The end of a session is handed to a run of its own at once (the same hook again, with the event in
+ * KEEPPLAIN_HOOK_EVENT), and this one returns: an agent on its way out does not wait for its hooks. Crush ends its
+ * SessionEnd hook with itself, a second or so after starting it (seen in a live run: a hook that took four seconds never
+ * finished), and reading the session takes about that long, more on a busy computer.
+ */
+async function readerHook(agent, name, { snapshot = true, event = null } = {}) {
+    const printed = [];
+    const log = console.log;
+    console.log = (...args) => printed.push(args.map(String).join(' '));
+    let id = null;
+    try {
+        const handed = handedEvent();
+        event = readerEvent(agent, event ?? handed ?? (await readEvent()));
+        id = event.session_id;
+        if (name === 'session-end' && !handed) {
+            if (id && !event.skip) inBackground(['hook', agent, name], { ...process.env, KEEPPLAIN_HOOK_EVENT: JSON.stringify({ session_id: id, cwd: event.cwd }) });
+        } else if (!event.skip) {
+            // An event the agent sends that is none of ours (Qwen's prompt hook after a tool's result) does nothing.
+            if (id && ['stop', 'tool', 'session-end'].includes(name)) event.transcript_path = readerPath(agent, id);
+            await dispatch(agent, name, { snapshot, event });
+        }
+    } catch {
+        // Odd input or an unreadable home folder: the session goes on as it would without the plugin.
+    } finally {
+        console.log = log;
+    }
+    try {
+        const answer = hookAnswer(agent, name, printed, { id });
+        if (answer) process.stdout.write(answer);
+    } catch {
+        // nothing to say
+    }
+}
+
+/** The event a hook of a reader's agent handed to this run (KEEPPLAIN_HOOK_EVENT), or null; never passed further on. */
+function handedEvent() {
+    const text = process.env.KEEPPLAIN_HOOK_EVENT;
+    if (!text) return null;
+    delete process.env.KEEPPLAIN_HOOK_EVENT;
+    try {
+        const event = JSON.parse(text);
+
+        return event && typeof event === 'object' && !Array.isArray(event) ? event : null;
+    } catch {
+        return null;
+    }
 }
 
 /**
@@ -179,12 +239,15 @@ function sessionStart({ event, agent, site, id, agentArgs }, emit = true) {
         pruneCursorNotes();
     }
     if (agent === 'antigravity') pruneAntigravityNotes();
+    // The other agents' sessions as this program keeps them (lib/readers): the ones not written for a month go.
+    pruneReaders();
     const rules = rulesAtStart({ event, agent, site, agentArgs });
     // One systemMessage for everything the start has to say: the agents take one JSON object from a hook.
     const messages = [teamRulesAtStart({ event, agent, site, agentArgs }), rules?.line, ...shareAtStart({ event, site, agentArgs })].filter(Boolean);
     const out = {};
     // Where a systemMessage is not shown (lib/unsaid.mjs), the lines wait for the model to say them at the next prompt.
-    if (messages.length && showsMessages(agent, event, sessionFile(event, agent, id))) out.systemMessage = messages.join('\n');
+    // A reader's agent is asked for no file here: of none of them is it known that it shows a hook's message.
+    if (messages.length && !reads(agent) && showsMessages(agent, event, sessionFile(event, agent, id))) out.systemMessage = messages.join('\n');
     else keepUnsaid(agent, id, messages);
     pruneUnsaid();
     // The rules go to the agent: Claude Code, Codex and Pi take additionalContext, Cursor its additional_context.
@@ -313,15 +376,16 @@ function stop({ event, agent, site, id, agentArgs }) {
     if (id && mode === 'push') return;
     const messages = [];
     if (id && mode) {
-        // Antigravity has no end of a session: the end of its first turn sends it, as still going, the rest every five minutes.
-        syncIfDue(site, id, { path: event.transcript_path, agent, args: agentArgs, first: agent === 'antigravity' });
-    } else if (id && nudgeOn()) {
+        // Antigravity has no end of a session, nor have some of the agents read through a reader (Qwen, Cline): the end
+        // of its first turn sends it, as still going, the rest every five minutes.
+        syncIfDue(site, id, { path: event.transcript_path, agent, args: agentArgs, first: agent === 'antigravity' || READERS[agent]?.hooks?.endless === true });
+    } else if (id && nudgeOn() && !reads(agent)) {
         const path = sessionFile(event, agent, id);
         const builds = path ? nudgeDue({ agent, id, path }) : null;
         if (builds) messages.push(nudgeMessage(builds, commandIn(agent, 'build')));
     }
     // The limit of this agent is nearly used up (handoff plan, 47.3): once per crossing, the agents to go on in.
-    if (id && handoffOn()) {
+    if (id && handoffOn() && !reads(agent)) {
         const hit = nearLimit(readLimits(agent, sessionFile(event, agent, id)), handoffThreshold());
         if (hit && handoffDue(agent, id, hit)) {
             const message = handoffMessage(agent, hit, handoffTargets(agent));
@@ -330,7 +394,7 @@ function stop({ event, agent, site, id, agentArgs }) {
     }
     if (!messages.length) return;
     // Shown where the agent shows a systemMessage; elsewhere the model says it at the next prompt (lib/unsaid.mjs).
-    if (showsMessages(agent, event, sessionFile(event, agent, id))) console.log(JSON.stringify({ systemMessage: messages.join('\n') }));
+    if (!reads(agent) && showsMessages(agent, event, sessionFile(event, agent, id))) console.log(JSON.stringify({ systemMessage: messages.join('\n') }));
     else keepUnsaid(agent, id, messages);
 }
 

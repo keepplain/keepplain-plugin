@@ -17,6 +17,6 @@ if (!existsSync(file)) {
     process.exit(1);
 }
 
-const tests = ['cli', 'codex-auto', 'enable', 'enable-pi-cursor', 'git', 'githooks', 'library', 'pi-cursor', 'terminal', 'update', 'use'].map((name) => join(root, 'test', `${name}.test.mjs`));
+const tests = ['cli', 'codex-auto', 'enable', 'enable-pi-cursor', 'enable-readers', 'git', 'githooks', 'library', 'pi-cursor', 'readers-hooks', 'readers-live', 'terminal', 'update', 'use'].map((name) => join(root, 'test', `${name}.test.mjs`));
 const result = spawnSync(process.execPath, ['--import', pathToFileURL(join(root, 'test', 'isolate.mjs')).href, '--test', ...tests], { stdio: 'inherit', env: { ...process.env, KEEPPLAIN_BIN: file } });
 process.exit(result.status ?? 1);

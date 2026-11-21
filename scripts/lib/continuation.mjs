@@ -87,7 +87,7 @@ export async function findContinuation(id, path, cwd, { env = process.env, now =
         } catch {
             // the file is read above; now will do
         }
-        for (const s of folderSessions(cwd, { env, now })) {
+        for (const s of folderSessions(cwd, { env, now, readers: false })) {
             if (s.agent !== 'claude-code' || s.id === id || since - s.mtimeMs > DAYS * 86_400_000) continue;
             const index = await indexed(s);
             if (!index) continue;

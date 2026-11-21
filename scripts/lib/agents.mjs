@@ -14,6 +14,7 @@ import { home } from './credentials.mjs';
 import { cursorInstalled, cursorMcpServers, removeCursorMcpServer } from './cursor-install.mjs';
 import { piHome } from './pi.mjs';
 import { MARKETPLACE, PLUGIN_ID } from './plugin.mjs';
+import { hooksPresent } from './readers/hooks.mjs';
 import { configDir } from './session.mjs';
 import { claudeAppData, detectAgents, findProgram } from './detect.mjs';
 
@@ -130,6 +131,13 @@ function enabledVersion(agent, env) {
 /** The KeepPlain plugins installed in the agent: [{id, version, marketplace}] (empty when it cannot tell). */
 export function installedPlugins(agent, env = process.env) {
     if (agent.id === 'pi') return piPackages(env);
+    // An agent read through a reader has no plugin: ours is the hooks in its own file (lib/readers/hooks.mjs).
+    // Some of them count: what is there is ours to show, take out and write again (partial says the rest is missing).
+    if (agent.reads) {
+        const present = hooksPresent(agent.id, { env });
+
+        return present === 'none' ? [] : [{ id: PLUGIN_ID, marketplace: MARKETPLACE, version: enabledVersion(agent.id, env), hooks: true, partial: present === 'some' }];
+    }
     if (agent.id === 'antigravity') return antigravityInstalled(env, { id: PLUGIN_ID, marketplace: MARKETPLACE, version: enabledVersion('antigravity', env) });
     if (agent.id === 'cursor') {
         // The files are ours by their content; the version they were laid out in is in enable.json.
@@ -168,7 +176,8 @@ const isOurServer = (url, site) => typeof url === 'string' && (url.replace(/\/+$
  */
 export function manualMcpServers(agent, site, env = process.env) {
     // Pi and Antigravity reach the library through the program (mcp-call): no server of theirs is ours to find.
-    if (agent.id === 'pi' || agent.id === 'antigravity') return [];
+    // The agents read through a reader get no library from the plugin: a server of theirs is theirs.
+    if (agent.id === 'pi' || agent.id === 'antigravity' || agent.reads) return [];
     if (agent.id === 'cursor') return cursorMcpServers(site, env);
     if (agent.id === 'claude-code') {
         const file = env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, '.claude.json') : join(homedir(), '.claude.json');

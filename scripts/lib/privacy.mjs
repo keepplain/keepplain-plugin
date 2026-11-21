@@ -1,6 +1,6 @@
 // Generated from the site's resources/js/lib/privacyScan.ts by `npm run plugin:sync`. Do not edit here: change the site's
 // file and sync again. test/generated.test.mjs checks this hash of everything below, so an edit here fails the tests.
-// sha256:9b8622dddec4eac1f0d017ef273db95f791f3838d6aa8657e507072798d87474
+// sha256:f3916ad1b510d04de2aa6b6c07919e23f2ace95346bea59547adabd7563eab40
 
 /**
  * The privacy check that runs where the session lives (plan: local-first privacy, stage 2): in the browser before an
@@ -77,7 +77,7 @@ const RULES = [
     // tried there only: V8 tried \b at every hyphen and dot of a long run and read the rest of it each time. The look
     // back over the run's first dots and hyphens is made at a letter only, or a page of hyphens is read back from each.
     { type: 'EMAIL', pattern: /(\b[a-z][a-z0-9+.-]{0,30}:\/\/[^\s@/"']*@)|(?=[A-Za-z0-9_])(?<=(?<![A-Za-z0-9._%+-])[.%+-]*)[A-Za-z0-9_][A-Za-z0-9._%+-]*@(?!(?:example|test|localhost)\.)(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}\b/g, severity: 'warning', skip: 1 },
-    { type: 'IP_ADDRESS', pattern: /\b(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])\b/g, severity: 'warning' },
+    { type: 'IP_ADDRESS', pattern: /\b(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?!\d|\.\d)\b/g, severity: 'warning' },
     // A company's own network: an address in a URL or after user@, or anything under .corp / .intranet.
     { type: 'INTERNAL_HOST', pattern: /(?<=:\/\/|@)(?:[A-Za-z0-9-]+\.){1,20}(?:internal|corp|intranet|lan|local|localdomain)\b|(?:(?<![A-Za-z0-9_\-.\\])|(?<=\\[nrt]))(?:[A-Za-z0-9-]+\.){1,20}(?:corp|intranet|svc\.cluster\.local)\b/g, severity: 'warning' },
     // The Claude account and its organization, by id: they name the person like an address does. Both when they come

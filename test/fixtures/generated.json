@@ -20,7 +20,9 @@
     "slim/not-jsonl.txt": "21f1a4fab494517752999a22d1420a6c4a5eb9946e70f67471dccbf00b6db9d3",
     "slim/pi.jsonl": "6f4d92fddc3860102f9341e0a9b341293abccbfc7a4456f108f55d25412a16fe",
     "slim/pi.slim.jsonl": "58b89dcf7edeab10b35fffe437e54b0d98704db390965e5fed591a7aed71f20b",
-    "privacy/cases.json": "f046aec07fd7094785b2ed04a4de1dd65adffa1ef20887afa4136a6e37ae3e61",
+    "slim/reader.jsonl": "9c76d0f8bc6863b7364ea8e4fd113f99697c7a7d242bfaaf693a5f6c584848ef",
+    "slim/reader.slim.jsonl": "2199753a5d5666ee64420e44c099fb27b6e8613785412d4f98b143c655faab46",
+    "privacy/cases.json": "c1cebb78dc19bb48e64a51eb576f87a94d3612396886bc9de9d81ed19157076b",
     "grouping/task-keys.json": "2e9b6645164cfd8463bc8d6fc0b3d0a93c6c776a58f08b52066233d8fb94e138",
     "grouping/task-score.json": "688c734d2ed9625500822e4d877178d0c8f9c6953ab5ccae65ac16a3b24ed374"
 }

@@ -1,0 +1,824 @@
+{
+  "info": {
+    "id": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+    "slug": "swift-circuit",
+    "projectID": "7b176c845584f116ec08ab3197a7adf7b3ca7229",
+    "directory": "/home/agent/kp-capture/kilo",
+    "path": "",
+    "title": "New session - 2026-11-19T23:01:41.733Z",
+    "agent": "code",
+    "model": {
+      "id": "mock-model",
+      "providerID": "mock",
+      "variant": "default"
+    },
+    "version": "7.8.27",
+    "summary": {
+      "additions": 6,
+      "deletions": 0,
+      "files": 2
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 49444,
+      "output": 209,
+      "reasoning": 0,
+      "cache": {
+        "read": 49443,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "suggest",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1795129301733,
+      "updated": 1795129308365
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1795129305925
+        },
+        "agent": "code",
+        "model": {
+          "providerID": "mock",
+          "modelID": "mock-model"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": "hello.txt",
+              "patch": "diff --git a/hello.txt b/hello.txt\nnew file mode 100644\nindex 0000000..4ad5604\n--- /dev/null\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+hi from the live run",
+              "additions": 1,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "notes.md",
+              "patch": "diff --git a/notes.md b/notes.md\nnew file mode 100644\nindex 0000000..ed304cb\n--- /dev/null\n+++ b/notes.md\n@@ -0,0 +1,5 @@\n+# Notes\n+\n+first line\n+second line, edited\n+third line\n",
+              "additions": 5,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_1f60b6b45001vY8K12dc7yfeW2",
+        "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Write hello.txt with a shell command, then write the file notes.md, change one line of it, read it back, and answer with the single word: done\"",
+          "id": "prt_1f60b6b59001x7x9YuPu4xCISJ",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b6b45001vY8K12dc7yfeW2"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b6b45001vY8K12dc7yfeW2",
+        "role": "assistant",
+        "mode": "code",
+        "agent": "code",
+        "path": {
+          "cwd": "/home/agent/kp-capture/kilo",
+          "root": "/home/agent/kp-capture/kilo"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 16279,
+          "input": 8118,
+          "output": 43,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 8118
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129306887,
+          "completed": 1795129307549
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b6f07001cdk7CZsaVeL4Eu",
+        "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO"
+      },
+      "parts": [
+        {
+          "snapshot": "dd16ffc5743c5d8086b1f72dfb76b4aae22c78cf",
+          "type": "step-start",
+          "time": {
+            "start": 1795129307300
+          },
+          "id": "prt_1f60b70a4001lgHhX367qkvW9O",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b6f07001cdk7CZsaVeL4Eu"
+        },
+        {
+          "type": "reasoning",
+          "text": "The work is four small steps; start with the shell.",
+          "time": {
+            "start": 1795129307303,
+            "end": 1795129307306
+          },
+          "id": "prt_1f60b70a7001WWRzprzWa4lsix",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b6f07001cdk7CZsaVeL4Eu"
+        },
+        {
+          "type": "text",
+          "text": "I will write hello.txt with a shell command first.",
+          "time": {
+            "start": 1795129307309,
+            "end": 1795129307333
+          },
+          "id": "prt_1f60b70ad001IMofsS5PNYrg0K",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b6f07001cdk7CZsaVeL4Eu"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_mock1_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "printf 'hi from the live run\\n' > hello.txt && cat hello.txt"
+            },
+            "output": "hi from the live run\n",
+            "metadata": {
+              "output": "hi from the live run\n",
+              "exit": 0,
+              "description": "printf 'hi from the live run\\n' > hello.txt && cat hello.txt",
+              "truncated": false,
+              "approval": {
+                "source": "global",
+                "rule": {
+                  "permission": "bash",
+                  "pattern": "*",
+                  "action": "allow"
+                }
+              }
+            },
+            "title": "printf 'hi from the live run\\n' > hello.txt && cat hello.txt",
+            "time": {
+              "start": 1795129307327,
+              "end": 1795129307403
+            }
+          },
+          "id": "prt_1f60b70b3001AU6eQWTQAfgCpr",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b6f07001cdk7CZsaVeL4Eu"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aff65e464b82ee6a0a85a35757c49cd7726ef436",
+          "type": "step-finish",
+          "time": {
+            "start": 1795129307300,
+            "end": 1795129307510,
+            "elapsed": 210
+          },
+          "metrics": {
+            "generation": 204.76190476190476,
+            "source": "computed"
+          },
+          "tokens": {
+            "total": 16279,
+            "input": 8118,
+            "output": 43,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 8118
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b7178001Jtdw16G9xSQTqy",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b6f07001cdk7CZsaVeL4Eu"
+        },
+        {
+          "type": "patch",
+          "hash": "dd16ffc5743c5d8086b1f72dfb76b4aae22c78cf",
+          "files": [
+            "/home/agent/kp-capture/kilo/hello.txt"
+          ],
+          "id": "prt_1f60b7193001mwWgpjHo5Mp9R1",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b6f07001cdk7CZsaVeL4Eu"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b6b45001vY8K12dc7yfeW2",
+        "role": "assistant",
+        "mode": "code",
+        "agent": "code",
+        "path": {
+          "cwd": "/home/agent/kp-capture/kilo",
+          "root": "/home/agent/kp-capture/kilo"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 16385,
+          "input": 8170,
+          "output": 45,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 8170
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129307559,
+          "completed": 1795129307745
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b71a7001tzxQjElAW5C2rX",
+        "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO"
+      },
+      "parts": [
+        {
+          "snapshot": "aff65e464b82ee6a0a85a35757c49cd7726ef436",
+          "type": "step-start",
+          "time": {
+            "start": 1795129307649
+          },
+          "id": "prt_1f60b7201001j7KWQ21gOdyOuB",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b71a7001tzxQjElAW5C2rX"
+        },
+        {
+          "type": "text",
+          "text": "Now the notes file.",
+          "time": {
+            "start": 1795129307652,
+            "end": 1795129307668
+          },
+          "id": "prt_1f60b7204001ggP0AqaFDD75jp",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b71a7001tzxQjElAW5C2rX"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_mock2_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/home/agent/kp-capture/kilo/notes.md",
+              "content": "# Notes\n\nfirst line\nsecond line\nthird line\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/home/agent/kp-capture/kilo/notes.md",
+              "exists": false,
+              "filediff": {
+                "file": "/home/agent/kp-capture/kilo/notes.md",
+                "additions": 5,
+                "deletions": 0,
+                "patch": "Index: /home/agent/kp-capture/kilo/notes.md\n===================================================================\n--- /home/agent/kp-capture/kilo/notes.md\n+++ /home/agent/kp-capture/kilo/notes.md\n@@ -0,0 +1,5 @@\n+# Notes\n+\n+first line\n+second line\n+third line\n"
+              },
+              "truncated": false,
+              "approval": {
+                "source": "agent",
+                "agent": "code",
+                "rule": {
+                  "permission": "*",
+                  "pattern": "*",
+                  "action": "allow"
+                }
+              }
+            },
+            "title": "notes.md",
+            "time": {
+              "start": 1795129307664,
+              "end": 1795129307692
+            }
+          },
+          "id": "prt_1f60b7208001XEAq9IEY37KPxG",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b71a7001tzxQjElAW5C2rX"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "6ec6a45d531e3afdb0b3ec51dfc4a39fb7be19d5",
+          "type": "step-finish",
+          "time": {
+            "start": 1795129307649,
+            "end": 1795129307722,
+            "elapsed": 73
+          },
+          "metrics": {
+            "generation": 616.4383561643835,
+            "source": "computed"
+          },
+          "tokens": {
+            "total": 16385,
+            "input": 8170,
+            "output": 45,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 8170
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b724b001tg7Effe3la8ZQb",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b71a7001tzxQjElAW5C2rX"
+        },
+        {
+          "type": "patch",
+          "hash": "aff65e464b82ee6a0a85a35757c49cd7726ef436",
+          "files": [
+            "/home/agent/kp-capture/kilo/notes.md"
+          ],
+          "id": "prt_1f60b725c001K5Rcb1bjzNDqL4",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b71a7001tzxQjElAW5C2rX"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b6b45001vY8K12dc7yfeW2",
+        "role": "assistant",
+        "mode": "code",
+        "agent": "code",
+        "path": {
+          "cwd": "/home/agent/kp-capture/kilo",
+          "root": "/home/agent/kp-capture/kilo"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 16477,
+          "input": 8215,
+          "output": 47,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 8215
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129307752,
+          "completed": 1795129307936
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b726800146Se1oG9ZzKRcG",
+        "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO"
+      },
+      "parts": [
+        {
+          "snapshot": "6ec6a45d531e3afdb0b3ec51dfc4a39fb7be19d5",
+          "type": "step-start",
+          "time": {
+            "start": 1795129307806
+          },
+          "id": "prt_1f60b729e001jAD53H6OVusRKH",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b726800146Se1oG9ZzKRcG"
+        },
+        {
+          "type": "text",
+          "text": "One line of it needs a change.",
+          "time": {
+            "start": 1795129307808,
+            "end": 1795129307819
+          },
+          "id": "prt_1f60b72a0001laV3tO7PNgmxKJ",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b726800146Se1oG9ZzKRcG"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_mock3_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/home/agent/kp-capture/kilo/notes.md",
+              "oldString": "second line",
+              "newString": "second line, edited"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filediff": {
+                "file": "/home/agent/kp-capture/kilo/notes.md",
+                "additions": 1,
+                "deletions": 1,
+                "patch": "Index: /home/agent/kp-capture/kilo/notes.md\n===================================================================\n--- /home/agent/kp-capture/kilo/notes.md\n+++ /home/agent/kp-capture/kilo/notes.md\n@@ -1,5 +1,5 @@\n # Notes\n \n first line\n-second line\n+second line, edited\n third line\n"
+              },
+              "truncated": false,
+              "approval": {
+                "source": "agent",
+                "agent": "code",
+                "rule": {
+                  "permission": "*",
+                  "pattern": "*",
+                  "action": "allow"
+                }
+              }
+            },
+            "title": "notes.md",
+            "time": {
+              "start": 1795129307817,
+              "end": 1795129307840
+            }
+          },
+          "id": "prt_1f60b72a3001BaK2w732nCI3oG",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b726800146Se1oG9ZzKRcG"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "time": {
+            "start": 1795129307806,
+            "end": 1795129307905,
+            "elapsed": 99
+          },
+          "metrics": {
+            "generation": 474.74747474747477,
+            "source": "computed"
+          },
+          "tokens": {
+            "total": 16477,
+            "input": 8215,
+            "output": 47,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 8215
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b7306001fJTTDBxtFwtYRB",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b726800146Se1oG9ZzKRcG"
+        },
+        {
+          "type": "patch",
+          "hash": "6ec6a45d531e3afdb0b3ec51dfc4a39fb7be19d5",
+          "files": [
+            "/home/agent/kp-capture/kilo/notes.md"
+          ],
+          "id": "prt_1f60b7318001B1YG0hHy3IBrO6",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b726800146Se1oG9ZzKRcG"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b6b45001vY8K12dc7yfeW2",
+        "role": "assistant",
+        "mode": "code",
+        "agent": "code",
+        "path": {
+          "cwd": "/home/agent/kp-capture/kilo",
+          "root": "/home/agent/kp-capture/kilo"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 16546,
+          "input": 8261,
+          "output": 24,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 8261
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129307943,
+          "completed": 1795129308083
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b7327001qgK6NBZKv50wnr",
+        "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO"
+      },
+      "parts": [
+        {
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-start",
+          "time": {
+            "start": 1795129308015
+          },
+          "id": "prt_1f60b736f001i66Xl66mvo528J",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b7327001qgK6NBZKv50wnr"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_mock4_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/home/agent/kp-capture/kilo/notes.md"
+            },
+            "output": "<path>/home/agent/kp-capture/kilo/notes.md</path>\n<type>file</type>\n<content>\n1: # Notes\n2: \n3: first line\n4: second line, edited\n5: third line\n\n(End of file - total 5 lines)\n</content>",
+            "metadata": {
+              "preview": "# Notes\n\nfirst line\nsecond line, edited\nthird line",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/home/agent/kp-capture/kilo/notes.md",
+                "text": "# Notes\n\nfirst line\nsecond line, edited\nthird line",
+                "lineStart": 1,
+                "lineEnd": 5,
+                "totalLines": 5,
+                "truncated": false
+              },
+              "approval": {
+                "source": "agent",
+                "agent": "code",
+                "rule": {
+                  "permission": "read",
+                  "pattern": "*",
+                  "action": "allow"
+                }
+              }
+            },
+            "title": "notes.md",
+            "time": {
+              "start": 1795129308023,
+              "end": 1795129308047
+            }
+          },
+          "id": "prt_1f60b7372001UPvAoiKtc1n0Zs",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b7327001qgK6NBZKv50wnr"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "time": {
+            "start": 1795129308015,
+            "end": 1795129308069,
+            "elapsed": 54
+          },
+          "metrics": {
+            "generation": 444.44444444444446,
+            "source": "computed"
+          },
+          "tokens": {
+            "total": 16546,
+            "input": 8261,
+            "output": 24,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 8261
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b73a6001fCXenNIOqkpNGS",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b7327001qgK6NBZKv50wnr"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b6b45001vY8K12dc7yfeW2",
+        "role": "assistant",
+        "mode": "code",
+        "agent": "code",
+        "path": {
+          "cwd": "/home/agent/kp-capture/kilo",
+          "root": "/home/agent/kp-capture/kilo"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 16676,
+          "input": 8317,
+          "output": 43,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 8316
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129308088,
+          "completed": 1795129308232
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b73b8001gSKOWTH8UB6cZ0",
+        "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO"
+      },
+      "parts": [
+        {
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-start",
+          "time": {
+            "start": 1795129308138
+          },
+          "id": "prt_1f60b73ea0017eVUvAVJbyaT2R",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b73b8001gSKOWTH8UB6cZ0"
+        },
+        {
+          "type": "text",
+          "text": "Last, a file that is not there.",
+          "time": {
+            "start": 1795129308141,
+            "end": 1795129308166
+          },
+          "id": "prt_1f60b73ed0011E3wYVoz4UB7Vp",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b73b8001gSKOWTH8UB6cZ0"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_mock5_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "env | grep -iE 'session|thread|conversation' | sort; cat definitely-missing.txt"
+            },
+            "output": "cat: definitely-missing.txt: No such file or directory\n",
+            "metadata": {
+              "output": "cat: definitely-missing.txt: No such file or directory\n",
+              "exit": 1,
+              "description": "env | grep -iE 'session|thread|conversation' | sort; cat definitely-missing.txt",
+              "truncated": false,
+              "approval": {
+                "source": "global",
+                "rule": {
+                  "permission": "bash",
+                  "pattern": "*",
+                  "action": "allow"
+                }
+              }
+            },
+            "title": "env | grep -iE 'session|thread|conversation' | sort; cat definitely-missing.txt",
+            "time": {
+              "start": 1795129308164,
+              "end": 1795129308187
+            }
+          },
+          "id": "prt_1f60b73ef001eTWtEvfVbECuqh",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b73b8001gSKOWTH8UB6cZ0"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "time": {
+            "start": 1795129308138,
+            "end": 1795129308216,
+            "elapsed": 78
+          },
+          "metrics": {
+            "generation": 551.2820512820513,
+            "source": "computed"
+          },
+          "tokens": {
+            "total": 16676,
+            "input": 8317,
+            "output": 43,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 8316
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b7438001QiMq270DCPJ70G",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b73b8001gSKOWTH8UB6cZ0"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b6b45001vY8K12dc7yfeW2",
+        "role": "assistant",
+        "mode": "code",
+        "agent": "code",
+        "path": {
+          "cwd": "/home/agent/kp-capture/kilo",
+          "root": "/home/agent/kp-capture/kilo"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 16733,
+          "input": 8363,
+          "output": 7,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 8363
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129308236,
+          "completed": 1795129308322
+        },
+        "finish": "stop",
+        "id": "msg_1f60b744c001JrIJ46hW6xnK9Z",
+        "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO"
+      },
+      "parts": [
+        {
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-start",
+          "time": {
+            "start": 1795129308287
+          },
+          "id": "prt_1f60b747f001hmVHBqzLnTKc4R",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b744c001JrIJ46hW6xnK9Z"
+        },
+        {
+          "type": "text",
+          "text": "done",
+          "time": {
+            "start": 1795129308290,
+            "end": 1795129308292
+          },
+          "id": "prt_1f60b7482001oeyot9YtrP887x",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b744c001JrIJ46hW6xnK9Z"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "time": {
+            "start": 1795129308287,
+            "end": 1795129308309,
+            "elapsed": 22
+          },
+          "metrics": {
+            "generation": 318.1818181818182,
+            "source": "computed"
+          },
+          "tokens": {
+            "total": 16733,
+            "input": 8363,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 8363
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b7495001dmL31sDAAId1mR",
+          "sessionID": "ses_e09f4a51affe8F6Q5o65C6wFuO",
+          "messageID": "msg_1f60b744c001JrIJ46hW6xnK9Z"
+        }
+      ]
+    }
+  ]
+}

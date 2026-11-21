@@ -2,7 +2,7 @@
 
 Your coding agent forgets everything when a session ends. [KeepPlain](https://keepplain.com) keeps that history, so you stop explaining the same thing twice.
 
-Works with Claude Code, Codex, Cursor, Pi and Antigravity. Free for personal use, teams pay per seat.
+Works with Claude Code, Codex, Cursor, Pi and Antigravity, and reads the sessions of GitHub Copilot CLI, Gemini CLI, OpenCode, Kilo Code, Cline, Junie, Qwen Code, Mistral Vibe, Factory Droid, Goose, Crush and Grok [where they keep them](#the-other-agents). Free for personal use, teams pay per seat.
 
 ```
 curl -fsSL https://keepplain.com/install.sh | sh    # macOS and Linux
@@ -215,6 +215,45 @@ Your memory starts empty: `search_my_work` and "why did this change" find only w
 
 `keepplain import-past status` says how far it got and why it waits; `keepplain import-past stop` stops it, and what was imported stays in your drafts. `~/.keepplain/past-import.json` holds the import's sessions (their ids, files, folders, project names and repository addresses, never what was said in them) and its counts; the lists go 30 days after the import ended. `auto.log` gets a line per session, as for auto mode. `enable` remembers a no and does not ask again; `keepplain import-past` asks again when you want it.
 
+### The other agents
+
+Twelve more agents are served by reading their sessions where each keeps them. `keepplain sessions` lists them with the rest, `keepplain build` sends one from a terminal (the newest of the folder, a number from the list, or `keepplain build <session id>`; from a script, `keepplain preview <session id> --agent=<agent>` and then `send`), and `keepplain import-past` takes the past ones. No plugin goes into them. Nine of them run hooks, and on macOS and Linux `keepplain enable` puts KeepPlain's into the agent's own file (the table after this one); in the other three, and in all twelve on Windows for now, a session goes when you send it.
+
+| Agent | `--agent=` | Where its sessions are | Read |
+| --- | --- | --- | --- |
+| GitHub Copilot CLI (and the Copilot agent in VS Code, which writes there too) | `copilot` | `~/.copilot/session-state/<id>/events.jsonl` (`COPILOT_HOME`) | the file |
+| Gemini CLI | `gemini-cli` | `~/.gemini/tmp/<project>/chats/session-*.jsonl` | the file, replayed: it is a log of changes |
+| OpenCode | `opencode` | `~/.local/share/opencode/opencode.db` (`XDG_DATA_HOME`, `OPENCODE_DB`) | `opencode db` for the list, `opencode export` for a session |
+| Kilo Code (the command line and the editor extension from 7) | `kilo` | `~/.local/share/kilo/kilo.db` (`KILO_DB`) | `kilo db`, `kilo export` |
+| Junie (run with a task) | `junie` | `~/.junie/sessions/<id>/events.jsonl`, `state.json` (`JUNIE_HOME`) | the files |
+| Cline (3.0 and later) | `cline` | `~/.cline/data/sessions/<id>/<id>.messages.json` (`CLINE_DIR`, `CLINE_DATA_DIR`) | the file |
+| Qwen Code | `qwen-code` | `~/.qwen/projects/<folder>/chats/<id>.jsonl` (`QWEN_HOME`) | the file |
+| Mistral Vibe (3.0 and later) | `vibe` | `~/.vibe/logs/session/unified/<id>/` (`VIBE_HOME`) | the last snapshot and the journal since it |
+| Factory Droid | `droid` | `~/.factory/sessions/<folder>/<id>.jsonl` | the file |
+| Goose | `goose` | `sessions.db` in Goose's data folder (`GOOSE_PATH_ROOT`) | `goose session list`, `goose session export` |
+| Crush | `crush` | `.crush/crush.db` in each project, the projects in Crush's `projects.json` (`CRUSH_GLOBAL_DATA`) | `crush --cwd <project> session list`, `session show` |
+| Grok | `grok` | `~/.grok/sessions/<folder>/<id>/updates.jsonl` (`GROK_HOME`) | the file |
+
+The hooks, on macOS and Linux: `keepplain enable` (or `keepplain enable --agent=<agent>`) writes them into the agent's own hooks file, next to whatever is there, and `keepplain disable` takes them out again and leaves the rest as it was. Each runs `keepplain hook <agent> <event>`. A hook file of your own with the name one of ours would have (Cline's, Goose's) stays as it is: that one event then has no hook of KeepPlain's, `keepplain status` says only some are in, and `disable` still takes out the ones that are. With them, auto mode sends the agent's sessions as it does Claude Code's, the git snapshots of a session are taken, and where the agent puts a hook's text before the model your rules reach it. A file that cannot be read as JSON (comments, a syntax error) is left alone, and `enable` says so.
+
+| Agent | Where the hooks go | Your rules in its sessions | Auto mode sends a session |
+| --- | --- | --- | --- |
+| GitHub Copilot CLI | `~/.copilot/hooks/keepplain.json` | at the start and with a prompt | when it ends |
+| Gemini CLI | `hooks` in `~/.gemini/settings.json` | at the start and with a prompt | when it ends |
+| Qwen Code | `hooks` in `~/.qwen/settings.json` | at the start and with a prompt | after its first turn, as still going: run with `-p`, it runs no hook at its end |
+| Factory Droid | `~/.factory/hooks.json` | at the start and with a prompt | when it ends |
+| Junie | `hooks` in `~/.junie/config.json` | with the first prompt (the start's too: Junie takes no text at a start) | when it ends |
+| Mistral Vibe | `~/.vibe/hooks.toml`, between two marked lines | no: it takes no text from a hook | when it ends |
+| Cline | `~/.cline/hooks/TaskStart`, `TaskComplete` | no | after its first turn, as still going |
+| Crush | `~/.config/crush/crushrc`, between two marked lines | no | when it ends |
+| Goose | a plugin folder, `~/.agents/plugins/keepplain/` | no | when it ends |
+
+OpenCode and Kilo Code take hooks only as a JavaScript plugin, and Grok's were not tried: nothing goes into these three. How each agent runs a hook's command on Windows has not been seen in a live run, so on Windows none of the twelve gets hooks yet. Every row of the table is what a live run of that agent showed (`live/hook-probe.sh` for what a hook is given, `live/reader-hooks.mjs` for the whole way: `keepplain enable`, a session, its arrival at a stand-in for the site).
+
+Each session is turned into the lines Claude Code writes and kept in `~/.keepplain/readers/<agent>/<id>.jsonl`, written again when the agent's own copy changes; from there it is slimmed, checked for secrets and sent exactly as a Claude Code session is, with its file changes, its failed commands and its tokens. For the four agents that keep a database, their own command reads it (it has to be in `PATH`), asked again only when the database file changes. Inside a command the agent itself runs, the session is known where the agent says it: `COPILOT_AGENT_SESSION_ID`, `QWEN_CODE_SESSION_ID`, `FACTORY_SESSION_ID`, `AGENT_SESSION_ID` (Goose), `GROK_SESSION_ID`, `JUNIE_TMPDIR`; the others say nothing, and the id comes from `keepplain sessions`.
+
+What each agent's own record lacks stays lacking: Junie's log has no words of the model's between its calls and no content of a file it read; Goose's edits say what changed, not on which line; Droid and Vibe count tokens for the session, not for each request; Crush keeps only its last request's, so a Crush session comes without tokens, and its edits, like Goose's, without line numbers. Every reader was written against a session taken from the agent itself (`live/capture.sh`, with a stand-in for the model: `live/mock-model.mjs`), which is in `test/fixtures/readers`.
+
 ### Private and team drafts
 
 A draft is private: it is in your [My builds](https://keepplain.com/library), not in the feed, search engines or your profile. If you are in a team on KeepPlain and the session ran in a repository of one of the GitHub organisations the team named, the draft goes to the team's space instead: the team sees it, nobody else. The preview says where the draft goes before anything is sent; `--private` and `--team <slug>` override it. Publishing to the community is always a separate step on the site, and for a team's draft only if the team allows it.
@@ -386,8 +425,9 @@ Nothing else is read as a credential. Your GitHub sign-in stays with your `gh`, 
 | `auto.json`, `auto-sessions.json`, `auto.log` | Auto mode's choice, the sessions it saw (path, sizes, times), what it sent | Until you change it; each session 14 days after it was last seen; 500 lines, none older than 30 days |
 | `sent.json` | Sessions you sent by hand, with the draft link | 90 days |
 | `sessions/<id>.json` | Where a Claude Code, Cursor or Pi session ran and `HEAD` at its start | 30 days |
+| `readers/<agent>/<id>.jsonl`, `readers/<agent>/.sessions.json`, `readers/crush/.sessions-<hash>.json`, `readers/<agent>/.start-<id>.txt` | A session of [another agent](#the-other-agents) as the lines Claude Code writes: the whole conversation, as the agent's own file has it. The list of an agent's sessions its command printed (ids, folders, times); Crush keeps a database in each project, so one list per project. And, for an agent that takes a hook's text only with a prompt (Junie), your rules for the session's start, kept until its first prompt | Written again when the agent's copy changes; gone 30 days after it was last written. The rules' file goes with the first prompt |
 | `cursor/<id>.json`, `cursor/current/` | What Cursor's hooks noted: the time of each turn, the model, the tokens, and which conversation each workspace is in. No text | 30 days |
-| `snapshots/<id>.json`, `.index` | The git snapshots of a Claude Code, Cursor or Pi session | 14 days |
+| `snapshots/<id>.json`, `.index` | The git snapshots of a session of an agent with KeepPlain's hooks: Claude Code, Cursor, Pi, Antigravity, and the nine other agents that take them. Off for a session whose repository is too slow for them, or holds your home folder | 14 days |
 | `nudges/` | Where the Stop hook stopped reading, and the counts and slugs it found | 14 days |
 | `kept.json`, `privacy.json` | Hashes of values you chose to send; your words to hide | Until you edit them |
 | `share.json` | Whether the share auto mode is on, when each repository was last checked, what it did since the last start | Checks 30 days; the notes until the next start shows them |

@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "session_id": "1795129815327_8cjyv",
+  "source": "cli",
+  "pid": 120,
+  "started_at": "2026-11-19T23:10:15.331Z",
+  "ended_at": "2026-11-19T23:10:16.387Z",
+  "exit_code": 0,
+  "status": "completed",
+  "interactive": false,
+  "provider": "openai-compatible",
+  "model": "mock-model",
+  "cwd": "/home/agent/kp-capture/cline",
+  "workspace_root": "/home/agent/kp-capture/cline",
+  "team_name": "team-j32XR",
+  "enable_tools": true,
+  "enable_spawn": true,
+  "enable_teams": true,
+  "prompt": "Write hello.txt with a shell command, then write the file notes.md, change one line of it, read it back, and answer with the single word: done",
+  "metadata": {
+    "sessionHistoryOrigin": {
+      "mode": "user",
+      "version": "3.0.74"
+    },
+    "git": {
+      "branch": "master"
+    },
+    "checkpoint": {
+      "latest": {
+        "ref": "a919442bef84d4c857cb2cd304c9fc422008fbae",
+        "createdAt": 1795129815973,
+        "runCount": 1,
+        "kind": "commit"
+      },
+      "history": [
+        {
+          "ref": "a919442bef84d4c857cb2cd304c9fc422008fbae",
+          "createdAt": 1795129815973,
+          "runCount": 1,
+          "kind": "commit"
+        }
+      ]
+    },
+    "title": "Write hello.txt with a shell command, then write the file notes.md, change one line of it, read it back, and answer with",
+    "totalCost": 0,
+    "aggregatedAgentsCost": 0,
+    "usage": {
+      "inputTokens": 34700,
+      "outputTokens": 215,
+      "cacheReadTokens": 17348,
+      "cacheWriteTokens": 0,
+      "totalCost": 0
+    },
+    "aggregateUsage": {
+      "inputTokens": 34700,
+      "outputTokens": 215,
+      "cacheReadTokens": 17348,
+      "cacheWriteTokens": 0,
+      "totalCost": 0
+    }
+  },
+  "messages_path": "/home/agent/.cline/data/sessions/1795129815327_8cjyv/1795129815327_8cjyv.messages.json"
+}

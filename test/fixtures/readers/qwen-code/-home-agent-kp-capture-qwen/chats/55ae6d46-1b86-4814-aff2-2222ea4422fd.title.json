@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "displayName": "Write hello.txt with a shell command, then write the file notes.md, change one line of it, read it back, and answer with the single word: done",
+  "source": "prompt",
+  "updatedAt": "2026-11-19T22:53:40.138Z"
+}

@@ -1,0 +1,9 @@
+[
+    {"text": "I will write hello.txt with a shell command first.", "calls": [{"tool": "^bash$", "args": {"command": "printf 'hi from the live run\n' > hello.txt && cat hello.txt"}}]},
+    {"text": "Now the notes file.", "calls": [{"tool": "^create$", "args": {"filename": "${CWD}/notes.md", "content": "# Notes\n\nfirst line\nsecond line\nthird line\n"}}]},
+    {"text": "One line of it needs a change.", "calls": [{"tool": "^search_replace$", "args": {"file_path": "${CWD}/notes.md", "search": "second line", "replace": "second line, edited"}}]},
+    {"text": "", "calls": [{"tool": "^open_entire_file$", "args": {"path": "${CWD}/notes.md"}}]},
+    {"text": "Last, a file that is not there.", "calls": [{"tool": "^bash$", "args": {"command": "env | grep -iE 'session|thread|conversation' | sort; cat definitely-missing.txt"}}]},
+    {"text": "done", "calls": [{"tool": "^submit$", "args": {"solution_summary": "done"}}]},
+    {"text": "done"}
+]

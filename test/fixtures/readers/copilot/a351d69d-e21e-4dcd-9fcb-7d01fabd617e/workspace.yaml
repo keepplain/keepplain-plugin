@@ -1,0 +1,12 @@
+id: a351d69d-e21e-4dcd-9fcb-7d01fabd617e
+cwd: /home/agent/kp-capture/copilot
+git_root: /home/agent/kp-capture/copilot
+branch: master
+client_name: github/cli
+last_client_name: github/cli
+name: 'Write hello.txt with a shell command, then write the file notes.md, change one line of it, read it back, and answer with the single word: done'
+user_named: false
+summary_count: 0
+fork_count: 0
+created_at: 2026-11-19T22:53:47.331Z
+updated_at: 2026-11-19T22:53:47.551Z

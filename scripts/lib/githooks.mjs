@@ -29,6 +29,7 @@ import { agentArgs } from './agent.mjs';
 import { inBackground, sessionAutoMode } from './auto.mjs';
 import { home } from './credentials.mjs';
 import { ranOutOfTime, required } from './programs.mjs';
+import { READERS, readerCurrent } from './readers/index.mjs';
 import { sessionEdits } from './edits.mjs';
 import { shCommand } from './plugin.mjs';
 import { agentOfSession, rolloutCwd, sentAt } from './sessions.mjs';
@@ -162,20 +163,26 @@ function replaying(root) {
 }
 
 /**
- * The agent session running this commit: Claude Code, Codex and Pi put their session's id in the environment of the
- * commands they run, and git runs the hook inside that command. Null in the person's own terminal, an IDE, or Cursor,
+ * The agent session running this commit: Claude Code, Codex and Pi (and of the agents read through a reader, those
+ * that do the same) put their session's id in the environment of the commands they run, and git runs the hook inside
+ * that command. Null in the person's own terminal, an IDE, or Cursor,
  * which tells its commands nothing.
  *
  * An id is inherited too: a terminal an agent opened (keepplain handoff --open), another agent started from its shell.
- * A session whose snapshots say its agent is not answering (the last one is not a prompt) runs no command now, so the
- * commit is not its; the next agent's id is tried.
+ * A session whose snapshots say its agent is not answering (its last prompt has had its stop) runs no command now, so
+ * the commit is not its; the next agent's id is tried. A start says nothing of that: Copilot runs the hook of a
+ * session's first prompt before the start's (seen in a live run), so its first turn's snapshots are prompt, start.
  */
 export function committingSession(env = process.env, dir = snapshotDir()) {
-    for (const id of [env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID, env.CODEX_THREAD_ID, env.PI_SESSION_ID]) {
+    // The agents read through a reader (lib/readers) that name their session to their commands: Copilot, Qwen, Droid,
+    // Goose, Junie, Grok. Those with hooks keep snapshots like the others; without them, the id alone says it.
+    const read = Object.keys(READERS).map((agent) => readerCurrent(agent, env));
+    for (const id of [env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID, env.CODEX_THREAD_ID, env.PI_SESSION_ID, ...read]) {
         if (!SESSION_ID.test(id ?? '')) continue;
         const state = readSnapshots(id, dir);
-        const last = state?.snapshots?.[state.snapshots.length - 1];
-        if (!last || state.disabled || last.kind === 'prompt') return id;
+        const snapshots = state?.snapshots ?? [];
+        const turn = snapshots.findLast((s) => s.kind !== 'start');
+        if (!snapshots.length || state.disabled || turn?.kind === 'prompt') return id;
     }
 
     return null;

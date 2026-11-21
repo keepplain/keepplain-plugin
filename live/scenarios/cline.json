@@ -1,0 +1,8 @@
+[
+    {"text": "I will write hello.txt with a shell command first.", "calls": [{"tool": "^run_commands$", "args": {"commands": ["printf 'hi from the live run\n' > hello.txt && cat hello.txt"]}}]},
+    {"text": "Now the notes file.", "calls": [{"tool": "^editor$", "args": {"path": "${CWD}/notes.md", "new_text": "# Notes\n\nfirst line\nsecond line\nthird line\n"}}]},
+    {"text": "One line of it needs a change.", "calls": [{"tool": "^editor$", "args": {"path": "${CWD}/notes.md", "old_text": "second line", "new_text": "second line, edited"}}]},
+    {"text": "", "calls": [{"tool": "^read_files$", "args": {"files": [{"path": "${CWD}/notes.md"}]}}]},
+    {"text": "Last, a file that is not there.", "calls": [{"tool": "^run_commands$", "args": {"commands": ["env | grep -iE 'session|thread|conversation' | sort; cat definitely-missing.txt"]}}]},
+    {"text": "done", "calls": [{"tool": "^submit_and_exit$", "args": {"summary": "Wrote hello.txt and notes.md, edited and read notes.md.", "verified": true}}]}
+]

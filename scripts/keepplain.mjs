@@ -132,6 +132,7 @@ import { discardPrepared, PREPARED_TTL_MS, prepared, sweepPrepared, writePrepare
 import { agentTimes, gitChangeLines, pruneSnapshots, withGitLines } from './lib/snapshots.mjs';
 import { addedFolders, slimLine } from './lib/slim.mjs';
 import { BINARY_VERSION, selfCommand, selfProgram, version } from './lib/runtime.mjs';
+import { readerCurrent, readerSessions, reads } from './lib/readers/index.mjs';
 import { agentOfSession, allSessions, describeSession, folderSessions, lastSent, markSent, sentAt, sentUrl, sessionCwd, sessionPath } from './lib/sessions.mjs';
 import { shellFolders } from './lib/shellfolders.mjs';
 import { changesSince, checkRules, saveRulesState } from './lib/team-rules.mjs';
@@ -321,6 +322,7 @@ function currentSession() {
     if (AGENT.id === 'pi') return env.PI_SESSION_ID;
     if (AGENT.id === 'cursor') return currentCursorSession(process.cwd(), env)?.id;
     if (AGENT.id === 'antigravity') return currentAntigravitySession(process.cwd(), env)?.id;
+    if (reads(AGENT.id)) return readerCurrent(AGENT.id, env);
 
     return env.CLAUDE_CODE_SESSION_ID || env.CLAUDE_SESSION_ID;
 }
@@ -385,7 +387,7 @@ async function prepare(id, cut = true, past = false) {
             pi: `Could not find this session's file (<time>_${id}.jsonl) under Pi's sessions folder.`,
             cursor: `Could not find this conversation's transcript (${id}.jsonl) under ~/.cursor/projects/…/agent-transcripts.`,
             antigravity: `Could not find this conversation's transcript (${id}/…/transcript_full.jsonl) under ~/.gemini/antigravity-cli/brain, antigravity/brain or antigravity-ide/brain.`,
-        }[AGENT.id] ?? `Could not find this session's transcript (${id}.jsonl) under the Claude Code config folder.`);
+        }[AGENT.id] ?? (reads(AGENT.id) ? `Could not find session ${id} among ${AGENT.name}'s sessions on this computer.` : null) ?? `Could not find this session's transcript (${id}.jsonl) under the Claude Code config folder.`);
     }
 
     // The session this one continues (grouping plan, 24.1): the Claude app copies its lines in, with new session ids.
@@ -1932,9 +1934,14 @@ async function importOutcome(started) {
  * Run by the SessionStart hook in the background: sends, one after another, the sessions that grew since their last
  * send and never said they ended (lib/auto.mjs, catchUp). $current is the session starting: its own hooks send it.
  * With the computer's mode off, only the sessions turned on for themselves.
+ *
+ * The file of a session read through a reader (lib/readers) is written when something asks for it, so the agent's
+ * sessions of the last week are read again first: one that went on after its last hook (an agent that runs none at a
+ * session's end; Qwen Code writes a session's last lines after it has exited) is then seen to have grown.
  */
 async function autoCatchUp(current) {
     const running = RUNNING_MODES.includes(autoMode(site, AGENT.id));
+    if (reads(AGENT.id)) readerSessions(null, process.env, { agents: [AGENT.id], since: Date.now() - 7 * 86_400_000 });
     for (const { id, final } of catchUp(site, current, AGENT.id, undefined, undefined, running)) {
         trackSession(site, id, { tried: Date.now() });
         await autoSend(id, { final, caughtUp: true });

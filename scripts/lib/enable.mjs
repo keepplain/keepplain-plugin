@@ -31,7 +31,9 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { AGENT_IDS, agentId } from './agent.mjs';
-import { detectAgents, installedPlugins, manualMcpServers, piPackageDir, removeMcpServer, runCli } from './agents.mjs';
+import { hooksInstalled, hooksSupported, installHooks as installAgentHooks, removeHooks as removeAgentHooks } from './readers/hooks.mjs';
+import { READERS, readerAgents } from './readers/index.mjs';
+import { detectAgents as pluginAgents, findProgram, installedPlugins, manualMcpServers, piPackageDir, removeMcpServer, runCli } from './agents.mjs';
 import { autoMode, inBackground, setAutoMode } from './auto.mjs';
 import { manualHookLines as antigravityHookLines, installAntigravity, SKILLS as ANTIGRAVITY_SKILLS, uninstallAntigravity } from './antigravity-install.mjs';
 import { manualHookLines as cursorHookLines, installCursor, SKILLS as CURSOR_SKILLS, uninstallCursor } from './cursor-install.mjs';
@@ -52,8 +54,36 @@ const SYNCED = 'synced';
 const DIRECTORY = "KeepPlain from Claude's plugin directory";
 /** What that copy lacks: it has no hooks, so whatever they do does not happen in that agent. */
 const DIRECTORY_LACKS = 'no auto mode, rules, git snapshots or handoff offer';
+/**
+ * The agents enable, disable and status know: the five the plugin goes into (lib/detect.mjs), then the ones it reads
+ * through a reader that are on this computer (lib/readers). Of those, the ones whose hooks it knows get them as files of
+ * the agent's own (native); the rest, and all of them on Windows, are only read (`reads`, not native).
+ */
+function detectAgents(env = process.env) {
+    const read = readerAgents(env).map((agent) => {
+        const cli = agent.command ? findProgram(agent.command, env) : null;
+
+        return { id: agent.id, name: agent.name, cli: null, command: cli, home: agent.home, reads: true, native: hooksSupported(agent.id), present: agent.present || Boolean(cli) };
+    });
+
+    return [...pluginAgents(env), ...read.filter((agent) => agent.present)];
+}
+
 /** An agent the plugin can be put into from here: it has a command that installs it, or its files are all it takes. */
-const installable = (agent) => Boolean(agent.cli || agent.native);
+const installable = (agent) => Boolean((agent.cli && !agent.reads) || agent.native);
+/** Where the hooks of an agent read through a reader are: its own file, with the home folder as ~. */
+const hooksFile = (agent) => {
+    const spec = READERS[agent.id]?.hooks;
+
+    return spec ? (spec.where ?? spec.file)(process.env) : agent.home;
+};
+/** What is said of an agent that is only read here: on Windows, or one whose hooks the plugin does not know. */
+const onlyRead = (agent) => `${agent.name}: its sessions are read where it keeps them (keepplain sessions, keepplain build, keepplain import-past); ${READERS[agent.id]?.hooks ? 'its hooks, for auto mode, are put in on macOS and Linux only for now' : 'it has no hooks the plugin can use, so there is no auto mode for it'}.`;
+/** Why only some of an agent's hooks are ours, and what to do: a hook file of the person's own, or one of ours taken out. */
+const partialWhy = (agent) =>
+    READERS[agent.id]?.hooks?.own
+        ? `a hook file of your own is in the way; keepplain enable --agent=${agent.id} leaves it as it is, and keepplain disable takes out only ours`
+        : `keepplain enable --agent=${agent.id} puts the rest in again, keepplain disable takes them all out`;
 /** The command line Cursor runs a hook with (through PowerShell on Windows). */
 const cursorRun = () => (process.platform === 'win32' ? psCommand(selfProgram()) : shCommand(selfProgram()));
 const RESTART = {
@@ -63,6 +93,9 @@ const RESTART = {
     pi: 'Type /reload in Pi, or start it again',
     antigravity: 'Start a new Antigravity conversation',
 };
+const restartOf = (agent) => RESTART[agent.id] ?? `Start a new ${agent.name} session`;
+/** The agents auto mode is set for: every one but those that are only read, which run no hook of ours. */
+const runsHooks = (agent) => !agent.reads || agent.native;
 
 /**
  * @param {{site: string, version: string, interactive: boolean, flags: {yes?: boolean, agents?: string[], auto?: string, mcp?: string, gitHooks?: boolean, trailers?: boolean, importPast?: boolean, importDays?: string}}} context
@@ -79,7 +112,7 @@ export async function enable({ site, version, interactive, flags, json = false, 
     if (Number.isNaN(pastWindow)) throw new Failure('--import-days takes a whole number of days from 1 to 90.');
 
     const agents = chosenAgents(flags.agents).filter((a) => a.present);
-    if (!agents.length) throw new Failure('Found none of Claude Code, Codex, Cursor, Pi and Antigravity on this computer. Install one of them, then run keepplain enable again.');
+    if (!agents.length) throw new Failure('Found none of Claude Code, Codex, Cursor, Pi, Antigravity or the agents KeepPlain reads on this computer. Install one of them, then run keepplain enable again.');
 
     const prompt = interactive && !json ? createInterface({ input: process.stdin, output: process.stdout }) : null;
     // --json (the desktop app): the steps as events, the closing lines as notes of the last one.
@@ -107,9 +140,10 @@ export async function enable({ site, version, interactive, flags, json = false, 
         log('Found:');
         event({ event: 'found', agents: state.map(({ agent, plugins }) => ({ id: agent.id, name: agent.name, cli: agent.cli ?? null, plugins: plugins.map((p) => p.id) })) });
         for (const { agent, plugins, servers } of state) {
-            const has = plugins.length ? plugins.map((p) => `${p.id} ${p.version ?? ''}`.trim()).join(', ') : 'no KeepPlain plugin';
+            const has = agent.reads ? (plugins.length ? (plugins[0].partial ? "some of KeepPlain's hooks" : "KeepPlain's hooks") : 'no KeepPlain hooks') : plugins.length ? plugins.map((p) => `${p.id} ${p.version ?? ''}`.trim()).join(', ') : 'no KeepPlain plugin';
             const hand = servers.length ? `; KeepPlain MCP server added by hand: ${servers.map(describeServer).join(', ')}` : '';
-            log(`  ${agent.name.padEnd(12)} ${agent.cli ?? (agent.native ? `${agent.home} (its files are all it takes)` : `${agent.home}, but not its command`)}; ${has}${hand}`);
+            const where = agent.cli ?? (agent.native ? `${agent.home} (its files are all it takes)` : agent.reads ? `${agent.home} (its sessions are read)` : `${agent.home}, but not its command`);
+            log(`  ${agent.name.padEnd(12)} ${where}; ${has}${hand}`);
         }
 
         // The questions.
@@ -174,7 +208,8 @@ export async function enable({ site, version, interactive, flags, json = false, 
         const installing = state.filter((s) => installable(s.agent) && !s.directoryOnly && (!s.others.length || s.replace));
         const plan = [`Lay out the plugin ${version} in ${pluginDir()}`];
         for (const s of state) {
-            if (!installable(s.agent)) plan.push(`${s.agent.name}: its command is not in PATH, so install the plugin from inside it (printed at the end)`);
+            if (s.agent.reads && !installable(s.agent)) plan.push(`${s.agent.name}: nothing to put in; its sessions are read where it keeps them`);
+            else if (!installable(s.agent)) plan.push(`${s.agent.name}: its command is not in PATH, so install the plugin from inside it (printed at the end)`);
             else if (s.directoryOnly) plan.push(`${s.agent.name}: keep ${DIRECTORY} (${s.synced.id}), no copy of ours`);
             else if (s.others.length && !s.replace) plan.push(`${s.agent.name}: leave it as it is (it keeps ${s.others.map((p) => p.id).join(', ')})`);
             else {
@@ -233,8 +268,8 @@ export async function enable({ site, version, interactive, flags, json = false, 
         }
 
         const mode = AUTO[auto];
-        const changed = autoName(mode) !== current || agents.some((a) => autoMode(site, a.id) !== mode);
-        if (changed) for (const agent of agents) setAutoMode(site, mode, agent.id);
+        const changed = autoName(mode) !== current || agents.filter(runsHooks).some((a) => autoMode(site, a.id) !== mode);
+        if (changed) for (const agent of agents.filter(runsHooks)) setAutoMode(site, mode, agent.id);
 
         if (repo && !repo.shared && gitHooks) {
             installHooks(repo, selfProgram(), { trailers });
@@ -250,7 +285,8 @@ export async function enable({ site, version, interactive, flags, json = false, 
         } else if (past) setPastState(site, { status: 'declined', asked_at: Date.now() });
 
         log('');
-        for (const agent of done) say(installedLine(agent, version));
+        // An agent read through a reader whose file could not take the hooks has a note saying so instead.
+        for (const agent of done) if (!agent.reads || hooksInstalled(agent.id)) say(installedLine(agent, version));
         for (const s of state.filter((x) => x.synced && installable(x.agent))) {
             say(s.directoryOnly
                 ? `${s.agent.name}: ${DIRECTORY} stays. That copy has no hooks: ${DIRECTORY_LACKS} in ${s.agent.name}, whatever auto mode says here. To have them, remove it on claude.ai, in Customize → Plugins, and run keepplain enable again.`
@@ -274,7 +310,7 @@ export async function enable({ site, version, interactive, flags, json = false, 
                 : `${n} past session${n === 1 ? '' : 's'} will go to your private drafts once you sign in.`);
         }
         if (!savedUsername(site)) say(`Not signed in to ${site} yet: run keepplain login.`);
-        event({ event: 'done', installed: done.map((a) => ({ id: a.id, name: a.name, restart: RESTART[a.id] })), failed, notes: said, auto, signed_in: Boolean(savedUsername(site)), past_import: pastSummary(site) });
+        event({ event: 'done', installed: done.map((a) => ({ id: a.id, name: a.name, restart: restartOf(a) })), failed, notes: said, auto, signed_in: Boolean(savedUsername(site)), past_import: pastSummary(site) });
     } finally {
         prompt?.close();
     }
@@ -320,6 +356,7 @@ export async function disable({ interactive, flags, json = false }) {
             if (s.agent.id === 'cursor') return `Cursor: take the hooks and skills${addedLibrary ? ' and the library entry' : ''} out of ~/.cursor`;
             if (s.agent.id === 'pi') return `Pi: remove the package ${piPackageDir()}`;
             if (s.agent.id === 'antigravity') return 'Antigravity: take the hooks and skills out of ~/.gemini';
+            if (s.agent.reads) return `${s.agent.name}: take the hooks out of ${hooksFile(s.agent)}`;
 
             return `${s.agent.name}: uninstall ${PLUGIN_ID} and its marketplace`;
         }),
@@ -354,6 +391,10 @@ export async function disable({ interactive, flags, json = false }) {
                 if (!ours) continue;
                 uninstallAntigravity();
                 if (!whole) writeChoices(Object.fromEntries(Object.entries(readChoices()).filter(([key]) => key !== 'antigravity')));
+            } else if (agent.reads) {
+                if (!ours) continue;
+                removeAgentHooks(agent.id);
+                if (!whole) writeChoices(Object.fromEntries(Object.entries(readChoices()).filter(([key]) => key !== agent.id)));
             } else if (agent.id === 'pi') {
                 if (!ours) continue;
                 step(agent, ['remove', ours.removeAs ?? ours.source]);
@@ -394,6 +435,14 @@ export function status({ site, version }) {
         }
         const plugins = installedPlugins(agent);
         const ours = plugins.find((p) => p.marketplace === MARKETPLACE);
+        if (agent.reads) {
+            // Nothing but hooks goes into an agent read through a reader, and those only where the plugin can put them.
+            const hooks = !agent.native ? (READERS[agent.id].hooks ? 'no hooks here (macOS and Linux only for now), so no auto mode' : 'it has no hooks the plugin can use, so no auto mode')
+                : ours ? `${ours.partial ? `some of its hooks in ${hooksFile(agent)}, not all (${partialWhy(agent)})` : `hooks in ${hooksFile(agent)}`}${ours.version && ours.version !== version ? ' (older than this file: keepplain enable)' : ''}; auto mode ${autoName(autoMode(site, agent.id))}`
+                    : `no KeepPlain hooks (keepplain enable --agent=${agent.id}); auto mode ${autoName(autoMode(site, agent.id))}`;
+            lines.push(`${agent.name.padEnd(13)} its sessions are read from ${agent.home}; ${hooks}`);
+            continue;
+        }
         const notes = [];
         if (!agent.cli && !agent.native) notes.push('its command is not in PATH, so the plugins cannot be listed');
         else if (!plugins.length) notes.push('no KeepPlain plugin (keepplain enable)');
@@ -427,17 +476,19 @@ export function status({ site, version }) {
  */
 export function agentStatus({ site, version }) {
     return detectAgents().map((agent) => {
-        const about = { id: agent.id, name: agent.name, present: agent.present, cli: agent.cli ?? null, home: agent.home, restart: RESTART[agent.id] };
+        const about = { id: agent.id, name: agent.name, present: agent.present, cli: agent.cli ?? null, home: agent.home, restart: restartOf(agent), ...(agent.reads ? { reads: true } : {}) };
         if (!agent.present) return { ...about, can_install: false, connected: false, managed: false, outdated: false, plugins: [], mcp_by_hand: [], auto: 'off', notes: [] };
         const plugins = installedPlugins(agent);
         const ours = plugins.find((p) => p.marketplace === MARKETPLACE);
         const servers = manualMcpServers(agent, site);
         const notes = [];
-        if (!installable(agent)) notes.push(`Its command is not in PATH, so its plugins cannot be listed or installed from here. ${manualSteps(agent)}`);
+        if (agent.reads && !installable(agent)) notes.push(onlyRead(agent));
+        else if (!installable(agent)) notes.push(`Its command is not in PATH, so its plugins cannot be listed or installed from here. ${manualSteps(agent)}`);
         const withHooks = plugins.filter((p) => p.marketplace !== SYNCED);
         if (withHooks.length > 1) notes.push('Two KeepPlain plugins: their hooks run twice. Connecting it again keeps one.');
         if (ours && agent.id === 'cursor' && !ours.hooks) notes.push('Its hooks are missing from ~/.cursor/hooks.json: connect it again.');
         if (ours && agent.id === 'antigravity' && !ours.hooks) notes.push('Its hooks are missing from ~/.gemini/config/hooks.json: connect it again.');
+        if (ours?.partial) notes.push(`Only some of KeepPlain's hooks are in ${hooksFile(agent)}: ${partialWhy(agent)}.`);
         if (plugins.some((p) => p.marketplace === SYNCED)) notes.push(`${DIRECTORY}${withHooks.length ? ' repeats the same commands' : ` has no hooks: ${DIRECTORY_LACKS} here`}. Remove it on claude.ai, in Customize → Plugins${withHooks.length ? '' : ', then connect it here'}.`);
         else if (plugins.length && !ours) notes.push(`Installed from elsewhere (${plugins.map((p) => p.id).join(', ')}): connecting it here replaces it.`);
 
@@ -449,7 +500,7 @@ export function agentStatus({ site, version }) {
             outdated: Boolean(ours?.version && ours.version !== version),
             plugins: plugins.map((p) => ({ id: p.id, version: p.version ?? null, source: p.marketplace === MARKETPLACE ? 'local' : p.marketplace === SYNCED ? 'directory' : 'other' })),
             mcp_by_hand: servers.map(describeServer),
-            auto: autoName(autoMode(site, agent.id)),
+            auto: runsHooks(agent) ? autoName(autoMode(site, agent.id)) : 'off',
             notes,
         };
     });
@@ -459,8 +510,11 @@ function chosenAgents(names) {
     const all = detectAgents();
     if (!names?.length) return all;
     const wanted = names.map((n) => agentId(n) ?? n);
-    const unknown = wanted.filter((n) => !all.some((a) => a.id === n));
-    if (unknown.length) throw new Failure(`--agent takes claude-code, codex, cursor, pi or antigravity, not ${unknown.join(', ')}.`);
+    const missing = wanted.filter((n) => !all.some((a) => a.id === n));
+    const unknown = missing.filter((n) => !READERS[n]);
+    if (unknown.length) throw new Failure(`--agent takes claude-code, codex, cursor, pi, antigravity or an agent KeepPlain reads (${Object.keys(READERS).join(', ')}), not ${unknown.join(', ')}.`);
+    // An agent read through a reader is listed only when it is on this computer: named and not here, that is said.
+    if (missing.length) throw new Failure(`${missing.map((n) => READERS[n].name).join(', ')}: not found on this computer (neither its command nor its folder).`);
 
     return all.filter((a) => wanted.includes(a.id));
 }
@@ -478,6 +532,7 @@ function installLine(s, mcp) {
     if (agent.id === 'cursor') return `Cursor: ${verb} the hooks (${'~/.cursor/hooks.json'}), the skills (~/.cursor/skills/keepplain-*)${s.servers.length && mcp === 'keep' ? '' : ' and the library (~/.cursor/mcp.json)'}`;
     if (agent.id === 'pi') return `Pi: ${verb} the package ${piPackageDir()} (pi install)`;
     if (agent.id === 'antigravity') return `Antigravity: ${verb} the hooks (~/.gemini/config/hooks.json) and the skills (~/.gemini/antigravity-cli/skills/keepplain-*)`;
+    if (agent.reads) return `${agent.name}: ${verb} the hooks (${hooksFile(agent)})`;
 
     return `${agent.name}: ${verb} ${PLUGIN_ID}${s.servers.length && mcp === 'keep' ? ', without its MCP server' : ''}`;
 }
@@ -487,7 +542,9 @@ const installedLine = (agent, version) =>
         ? `Cursor: KeepPlain ${version} is in ~/.cursor (hooks, skills, library). ${RESTART.cursor} to load it.`
         : agent.id === 'antigravity'
           ? `Antigravity: KeepPlain ${version} is in ~/.gemini (hooks, skills; the library through /keepplain-lookup). ${RESTART.antigravity} to load it.`
-          : `${agent.name}: ${PLUGIN_ID} ${version} is installed. ${RESTART[agent.id]} to load it.`;
+          : agent.reads
+            ? `${agent.name}: KeepPlain's hooks are in ${hooksFile(agent)}${READERS[agent.id].hooks.context?.prompt ? ': auto mode, and your rules in its sessions' : ': auto mode (it takes no text from a hook, so no rules there)'}. ${restartOf(agent)} to load them.`
+            : `${agent.name}: ${PLUGIN_ID} ${version} is installed. ${RESTART[agent.id]} to load it.`;
 
 /**
  * Puts the plugin into an agent from what layOut wrote: the plugin systems of Claude Code and Codex from the local
@@ -496,6 +553,7 @@ const installedLine = (agent, version) =>
 function installPlugin(agent, ours, { quiet = false, site, version, mcp = {} } = {}) {
     if (agent.id === 'cursor') return installCursorFiles({ site, version, mcp });
     if (agent.id === 'antigravity') return installAntigravityFiles({ site, version, mcp });
+    if (agent.reads) return installReaderHooks(agent, version);
     const run = quiet ? (a) => runCli(agent.cli, a) : (a) => step(agent, a);
     if (agent.id === 'pi') {
         // A local package is loaded where it is: laid out again, it is updated. Installed once.
@@ -547,6 +605,21 @@ function installAntigravityFiles({ site, version, mcp }) {
     return notes;
 }
 
+/**
+ * The hooks of an agent read through a reader, written into the agent's own file (lib/readers/hooks.mjs); what could
+ * not be is said.
+ */
+function installReaderHooks(agent, version) {
+    const done = installAgentHooks(agent.id);
+    if (!done.unreadable) writeChoices({ ...readChoices(), [agent.id]: { version } });
+
+    const notes = [];
+    if (done.unreadable) notes.push(`${agent.name}: ${done.file} could not be read (comments, or a syntax error), so it was left as it is and KeepPlain's hooks are not in ${agent.name}. Fix the file and run keepplain enable --agent=${agent.id} again.`);
+    for (const path of done.skipped) notes.push(`${agent.name}: ${path} is a hook of your own, so it was left as it is: KeepPlain's hook of that event is not in ${agent.name}.`);
+
+    return notes;
+}
+
 /** Another install of the plugin that would run its hooks twice: the agent's own command takes it away. */
 function removeOther(agent, p) {
     if (agent.id === 'pi') return step(agent, ['remove', p.removeAs ?? p.source]);
@@ -587,6 +660,8 @@ function reporter(json) {
 }
 
 function manualSteps(agent) {
+    if (agent.reads) return onlyRead(agent);
+
     return agent.id === 'codex'
         ? `Codex: its command is not in PATH. In a terminal where it is: codex plugin marketplace add "${pluginDir()}", then codex plugin add ${PLUGIN_ID}.`
         : agent.id === 'pi'

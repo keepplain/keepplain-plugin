@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { gunzipSync } from 'node:zlib';
 import { AGENTS, agentArgs, agentId, commandIn } from '../scripts/lib/agent.mjs';
+import { reads } from '../scripts/lib/readers/index.mjs';
 import { currentCursorSession, cursorEvent, cursorPrompt, cursorSessions, cursorSlug, describeCursor, findCursorTranscript, noteCursorEvent, readCursorSidecar, withCursorTimes, workspacePath } from '../scripts/lib/cursor.mjs';
 import { LibraryWatch } from '../scripts/lib/library.mjs';
 import { describePi, findPiSession, piFolderName, piHeader, piIdOf, piPrompt, piSessions } from '../scripts/lib/pi.mjs';
@@ -115,7 +116,9 @@ const cli = (args, extra = {}, input = null) => {
 };
 
 test('the agents: ids and aliases, how a command is typed, what a background run passes on', () => {
-    assert.deepEqual(Object.keys(AGENTS), ['claude-code', 'codex', 'cursor', 'pi', 'antigravity']);
+    // The agents the plugin goes into, then the ones whose sessions it reads where they keep them (lib/readers).
+    assert.deepEqual(Object.keys(AGENTS).filter((id) => !reads(id)), ['claude-code', 'codex', 'cursor', 'pi', 'antigravity']);
+    assert.ok(reads('grok') && AGENTS.grok.client === 'grok-plugin');
     assert.equal(agentId('claude'), 'claude-code');
     assert.equal(agentId('Pi'), 'pi');
     assert.equal(agentId('windsurf'), null);

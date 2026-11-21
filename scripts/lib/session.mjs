@@ -9,7 +9,7 @@ import { piIdOf } from './pi.mjs';
 import { zstdChunks, zstdContentSize } from './zstd.mjs';
 
 /** Session ids (Claude Code's, Codex's threads, Pi's, Cursor's conversations) are UUIDs; anything else never becomes part of a path. */
-export const SESSION_ID = /^[A-Za-z0-9-]{8,100}$/;
+export const SESSION_ID = /^[A-Za-z0-9_-]{8,100}$/;
 
 /**
  * The plugin's own commands inside the transcript: /keepplain:build, :auto, :lookup… are not part of the work. An

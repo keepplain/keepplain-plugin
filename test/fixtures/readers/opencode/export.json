@@ -1,0 +1,686 @@
+{
+  "info": {
+    "id": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+    "slug": "crisp-sailor",
+    "projectID": "7b176c845584f116ec08ab3197a7adf7b3ca7229",
+    "directory": "/home/agent/kp-capture/opencode",
+    "path": "",
+    "title": "Hello file",
+    "agent": "build",
+    "model": {
+      "id": "mock-model",
+      "providerID": "mock",
+      "variant": "default"
+    },
+    "version": "1.19.6",
+    "summary": {
+      "additions": 0,
+      "deletions": 0,
+      "files": 0
+    },
+    "cost": 0,
+    "tokens": {
+      "input": 23749,
+      "output": 212,
+      "reasoning": 0,
+      "cache": {
+        "read": 23747,
+        "write": 0
+      }
+    },
+    "permission": [
+      {
+        "permission": "question",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_enter",
+        "pattern": "*",
+        "action": "deny"
+      },
+      {
+        "permission": "plan_exit",
+        "pattern": "*",
+        "action": "deny"
+      }
+    ],
+    "time": {
+      "created": 1795129295665,
+      "updated": 1795129304603
+    }
+  },
+  "messages": [
+    {
+      "info": {
+        "role": "user",
+        "time": {
+          "created": 1795129295692
+        },
+        "agent": "build",
+        "model": {
+          "providerID": "mock",
+          "modelID": "mock-model"
+        },
+        "summary": {
+          "diffs": [
+            {
+              "file": "hello.txt",
+              "patch": "Index: hello.txt\n===================================================================\n--- hello.txt\t\n+++ hello.txt\t\n@@ -0,0 +1,1 @@\n+hi from the live run\n",
+              "additions": 1,
+              "deletions": 0,
+              "status": "added"
+            },
+            {
+              "file": "notes.md",
+              "patch": "Index: notes.md\n===================================================================\n--- notes.md\t\n+++ notes.md\t\n@@ -0,0 +1,5 @@\n+# Notes\n+\n+first line\n+second line, edited\n+third line\n",
+              "additions": 5,
+              "deletions": 0,
+              "status": "added"
+            }
+          ]
+        },
+        "id": "msg_1f60b434c001keQJco4mOwh1no",
+        "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj"
+      },
+      "parts": [
+        {
+          "type": "text",
+          "text": "\"Write hello.txt with a shell command, then write the file notes.md, change one line of it, read it back, and answer with the single word: done\"",
+          "id": "prt_1f60b435100146Gbau5ZOjJEhO",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b434c001keQJco4mOwh1no"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b434c001keQJco4mOwh1no",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/agent/kp-capture/opencode",
+          "root": "/home/agent/kp-capture/opencode"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 7728,
+          "input": 3843,
+          "output": 43,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 3842
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129296532,
+          "completed": 1795129301561
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b46940012BPsaeVLDOAkYx",
+        "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj"
+      },
+      "parts": [
+        {
+          "snapshot": "dd16ffc5743c5d8086b1f72dfb76b4aae22c78cf",
+          "type": "step-start",
+          "id": "prt_1f60b58e4001xvL3bRpjI6Uw3y",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b46940012BPsaeVLDOAkYx"
+        },
+        {
+          "type": "text",
+          "text": "I will write hello.txt with a shell command first.",
+          "time": {
+            "start": 1795129301224,
+            "end": 1795129301246
+          },
+          "id": "prt_1f60b58e8001sni0CJdzbSfZ1u",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b46940012BPsaeVLDOAkYx"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_mock2_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "printf 'hi from the live run\\n' > hello.txt && cat hello.txt"
+            },
+            "output": "hi from the live run\n",
+            "metadata": {
+              "output": "hi from the live run\n",
+              "exit": 0,
+              "truncated": false
+            },
+            "title": "printf 'hi from the live run\\n' > hello.txt && cat hello.txt",
+            "time": {
+              "start": 1795129301239,
+              "end": 1795129301352
+            }
+          },
+          "id": "prt_1f60b58ee0013z9GyWqgfld2zl",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b46940012BPsaeVLDOAkYx"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "aff65e464b82ee6a0a85a35757c49cd7726ef436",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7728,
+            "input": 3843,
+            "output": 43,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 3842
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b59e4001sQm4ESx6dUw68F",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b46940012BPsaeVLDOAkYx"
+        },
+        {
+          "type": "patch",
+          "hash": "dd16ffc5743c5d8086b1f72dfb76b4aae22c78cf",
+          "files": [
+            "/home/agent/kp-capture/opencode/hello.txt"
+          ],
+          "id": "prt_1f60b5a34001TynGODrQFPwChx",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b46940012BPsaeVLDOAkYx"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b434c001keQJco4mOwh1no",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/agent/kp-capture/opencode",
+          "root": "/home/agent/kp-capture/opencode"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 7816,
+          "input": 3885,
+          "output": 46,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 3885
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129301565,
+          "completed": 1795129302019
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b5a3d001wq6PD7A6bhPDwd",
+        "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj"
+      },
+      "parts": [
+        {
+          "snapshot": "aff65e464b82ee6a0a85a35757c49cd7726ef436",
+          "type": "step-start",
+          "id": "prt_1f60b5b29001gHbaFq1Y8Ddzr4",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5a3d001wq6PD7A6bhPDwd"
+        },
+        {
+          "type": "text",
+          "text": "Now the notes file.",
+          "time": {
+            "start": 1795129301804,
+            "end": 1795129301816
+          },
+          "id": "prt_1f60b5b2c001gLCfjyHXfS8FER",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5a3d001wq6PD7A6bhPDwd"
+        },
+        {
+          "type": "tool",
+          "tool": "write",
+          "callID": "call_mock3_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/home/agent/kp-capture/opencode/notes.md",
+              "content": "# Notes\n\nfirst line\nsecond line\nthird line\n"
+            },
+            "output": "Wrote file successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "filepath": "/home/agent/kp-capture/opencode/notes.md",
+              "exists": false,
+              "truncated": false
+            },
+            "title": "notes.md",
+            "time": {
+              "start": 1795129301813,
+              "end": 1795129301842
+            }
+          },
+          "id": "prt_1f60b5b2f0012fexVl2snT1xS7",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5a3d001wq6PD7A6bhPDwd"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "6ec6a45d531e3afdb0b3ec51dfc4a39fb7be19d5",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7816,
+            "input": 3885,
+            "output": 46,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 3885
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b5bc6001YmYwozT9YAoG2b",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5a3d001wq6PD7A6bhPDwd"
+        },
+        {
+          "type": "patch",
+          "hash": "aff65e464b82ee6a0a85a35757c49cd7726ef436",
+          "files": [
+            "/home/agent/kp-capture/opencode/notes.md"
+          ],
+          "id": "prt_1f60b5c01001AmmWAwGsvGZ08x",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5a3d001wq6PD7A6bhPDwd"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b434c001keQJco4mOwh1no",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/agent/kp-capture/opencode",
+          "root": "/home/agent/kp-capture/opencode"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 7909,
+          "input": 3931,
+          "output": 48,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 3930
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129302025,
+          "completed": 1795129302240
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b5c08001HV4qYp9sTIIel3",
+        "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj"
+      },
+      "parts": [
+        {
+          "snapshot": "6ec6a45d531e3afdb0b3ec51dfc4a39fb7be19d5",
+          "type": "step-start",
+          "id": "prt_1f60b5c65001zaq0PBG3mEsTDJ",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5c08001HV4qYp9sTIIel3"
+        },
+        {
+          "type": "text",
+          "text": "One line of it needs a change.",
+          "time": {
+            "start": 1795129302120,
+            "end": 1795129302134
+          },
+          "id": "prt_1f60b5c67001UTq4QfnPJQzMt3",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5c08001HV4qYp9sTIIel3"
+        },
+        {
+          "type": "tool",
+          "tool": "edit",
+          "callID": "call_mock4_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/home/agent/kp-capture/opencode/notes.md",
+              "oldString": "second line",
+              "newString": "second line, edited"
+            },
+            "output": "Edit applied successfully.",
+            "metadata": {
+              "diagnostics": {},
+              "diff": "Index: /home/agent/kp-capture/opencode/notes.md\n===================================================================\n--- /home/agent/kp-capture/opencode/notes.md\n+++ /home/agent/kp-capture/opencode/notes.md\n@@ -1,5 +1,5 @@\n # Notes\n \n first line\n-second line\n+second line, edited\n third line\n",
+              "filediff": {
+                "file": "/home/agent/kp-capture/opencode/notes.md",
+                "patch": "Index: /home/agent/kp-capture/opencode/notes.md\n===================================================================\n--- /home/agent/kp-capture/opencode/notes.md\n+++ /home/agent/kp-capture/opencode/notes.md\n@@ -1,5 +1,5 @@\n # Notes\n \n first line\n-second line\n+second line, edited\n third line\n",
+                "additions": 1,
+                "deletions": 1
+              },
+              "truncated": false
+            },
+            "title": "notes.md",
+            "time": {
+              "start": 1795129302131,
+              "end": 1795129302142
+            }
+          },
+          "id": "prt_1f60b5c6b001CJgsM8yjxAc0yb",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5c08001HV4qYp9sTIIel3"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7909,
+            "input": 3931,
+            "output": 48,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 3930
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b5cc0001GX1lqZptts7NI3",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5c08001HV4qYp9sTIIel3"
+        },
+        {
+          "type": "patch",
+          "hash": "6ec6a45d531e3afdb0b3ec51dfc4a39fb7be19d5",
+          "files": [
+            "/home/agent/kp-capture/opencode/notes.md"
+          ],
+          "id": "prt_1f60b5cdd001hbXz7j64TKTQ5w",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5c08001HV4qYp9sTIIel3"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b434c001keQJco4mOwh1no",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/agent/kp-capture/opencode",
+          "root": "/home/agent/kp-capture/opencode"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 7979,
+          "input": 3977,
+          "output": 25,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 3977
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129302243,
+          "completed": 1795129302336
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b5ce3001rqs2xeX208XO5t",
+        "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj"
+      },
+      "parts": [
+        {
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-start",
+          "id": "prt_1f60b5d07001iuFSrYvnJBKDB3",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5ce3001rqs2xeX208XO5t"
+        },
+        {
+          "type": "tool",
+          "tool": "read",
+          "callID": "call_mock5_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "filePath": "/home/agent/kp-capture/opencode/notes.md"
+            },
+            "output": "<path>/home/agent/kp-capture/opencode/notes.md</path>\n<type>file</type>\n<content>\n1: # Notes\n2: \n3: first line\n4: second line, edited\n5: third line\n\n(End of file - total 5 lines)\n</content>",
+            "metadata": {
+              "preview": "# Notes\n\nfirst line\nsecond line, edited\nthird line",
+              "truncated": false,
+              "loaded": [],
+              "display": {
+                "type": "file",
+                "path": "/home/agent/kp-capture/opencode/notes.md",
+                "text": "# Notes\n\nfirst line\nsecond line, edited\nthird line",
+                "lineStart": 1,
+                "lineEnd": 5,
+                "totalLines": 5,
+                "truncated": false
+              }
+            },
+            "title": "notes.md",
+            "time": {
+              "start": 1795129302286,
+              "end": 1795129302301
+            }
+          },
+          "id": "prt_1f60b5d09001wox3Rx96a1UEO4",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5ce3001rqs2xeX208XO5t"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "tokens": {
+            "total": 7979,
+            "input": 3977,
+            "output": 25,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 3977
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b5d31001SuFixi9agcTBW4",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5ce3001rqs2xeX208XO5t"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b434c001keQJco4mOwh1no",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/agent/kp-capture/opencode",
+          "root": "/home/agent/kp-capture/opencode"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 8109,
+          "input": 4033,
+          "output": 43,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 4033
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129302338,
+          "completed": 1795129303393
+        },
+        "finish": "tool-calls",
+        "id": "msg_1f60b5d42001F9bch0xWDbom5K",
+        "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj"
+      },
+      "parts": [
+        {
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-start",
+          "id": "prt_1f60b5d5f001mayrzDvlJmvLhf",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5d42001F9bch0xWDbom5K"
+        },
+        {
+          "type": "text",
+          "text": "Last, a file that is not there.",
+          "time": {
+            "start": 1795129302369,
+            "end": 1795129302382
+          },
+          "id": "prt_1f60b5d61001aZTfWGm4xp950w",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5d42001F9bch0xWDbom5K"
+        },
+        {
+          "type": "tool",
+          "tool": "bash",
+          "callID": "call_mock6_0",
+          "state": {
+            "status": "completed",
+            "input": {
+              "command": "env | grep -iE 'session|thread|conversation' | sort; cat definitely-missing.txt"
+            },
+            "output": "cat: definitely-missing.txt: No such file or directory\n",
+            "metadata": {
+              "output": "cat: definitely-missing.txt: No such file or directory\n",
+              "exit": 1,
+              "truncated": false
+            },
+            "title": "env | grep -iE 'session|thread|conversation' | sort; cat definitely-missing.txt",
+            "time": {
+              "start": 1795129302378,
+              "end": 1795129302394
+            }
+          },
+          "id": "prt_1f60b5d630012Kk8XNEQkdJ6fn",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5d42001F9bch0xWDbom5K"
+        },
+        {
+          "reason": "tool-calls",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8109,
+            "input": 4033,
+            "output": 43,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 4033
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b5d9d001oKGaZJJAhgoyVT",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b5d42001F9bch0xWDbom5K"
+        }
+      ]
+    },
+    {
+      "info": {
+        "parentID": "msg_1f60b434c001keQJco4mOwh1no",
+        "role": "assistant",
+        "mode": "build",
+        "agent": "build",
+        "path": {
+          "cwd": "/home/agent/kp-capture/opencode",
+          "root": "/home/agent/kp-capture/opencode"
+        },
+        "cost": 0,
+        "tokens": {
+          "total": 8167,
+          "input": 4080,
+          "output": 7,
+          "reasoning": 0,
+          "cache": {
+            "write": 0,
+            "read": 4080
+          }
+        },
+        "modelID": "mock-model",
+        "providerID": "mock",
+        "time": {
+          "created": 1795129303396,
+          "completed": 1795129304600
+        },
+        "finish": "stop",
+        "id": "msg_1f60b6164001IlX5wibyTEbidj",
+        "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj"
+      },
+      "parts": [
+        {
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-start",
+          "id": "prt_1f60b65ea001V8yojxIuT563rL",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b6164001IlX5wibyTEbidj"
+        },
+        {
+          "type": "text",
+          "text": "done",
+          "time": {
+            "start": 1795129304555,
+            "end": 1795129304557
+          },
+          "id": "prt_1f60b65eb001d56iRpDEhZrZ01",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b6164001IlX5wibyTEbidj"
+        },
+        {
+          "reason": "stop",
+          "snapshot": "90d85be1a89dc1587f2208ca316544e1521ebe78",
+          "type": "step-finish",
+          "tokens": {
+            "total": 8167,
+            "input": 4080,
+            "output": 7,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 4080
+            }
+          },
+          "cost": 0,
+          "id": "prt_1f60b6602001OXPrJAxsPJ3o5b",
+          "sessionID": "ses_e09f4bccfffeD5DqWr1cpOAVwj",
+          "messageID": "msg_1f60b6164001IlX5wibyTEbidj"
+        }
+      ]
+    }
+  ]
+}
