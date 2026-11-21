@@ -174,9 +174,8 @@ test('Grok: the files a session edited, for the file\'s history', () => {
     try {
         assert.deepEqual(sessionEdits(id, '/home/you/shop', b.env).map((e) => e.path), ['hello.txt']);
     } finally {
-        for (const key of Object.keys(b.env)) {
-            if (key in previous) process.env[key] = previous[key];
-            else delete process.env[key];
-        }
+        // Put back as it was (on Windows process.env takes a name in any case, a plain object does not).
+        for (const key of Object.keys(b.env)) delete process.env[key];
+        Object.assign(process.env, previous);
     }
 });

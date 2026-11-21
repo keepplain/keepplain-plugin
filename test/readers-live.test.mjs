@@ -207,10 +207,11 @@ for (const [agent, run] of Object.entries(AGENT_RUNS)) {
         try {
             assert.deepEqual([...new Set(sessionEdits(run.id, folder, env).map((e) => e.path))], ['notes.md']);
         } finally {
-            for (const key of Object.keys(env)) {
-                if (key in previous) process.env[key] = previous[key];
-                else delete process.env[key];
-            }
+            // Taken out and put back as they were. On Windows process.env takes a name in any case and a plain object does
+            // not: "PATH" in env is the runner's "Path", which a check of `key in previous` would find missing and delete,
+            // and Node 20 then cannot start a program at all.
+            for (const key of Object.keys(env)) delete process.env[key];
+            Object.assign(process.env, previous);
         }
     });
 
