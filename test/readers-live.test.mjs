@@ -7,7 +7,7 @@
 // (by the agents that have a tool for it); a shell command that fails; the word "done".
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -124,7 +124,10 @@ for (const [agent, run] of Object.entries(AGENT_RUNS)) {
         const { env } = install(agent);
         const [session] = readerSessions(null, env, { agents: [agent] });
         const lines = parse(readFileSync(session.path, 'utf8'));
-        assert.deepEqual(lines[0], { type: 'keepplain-session', v: 1, agent, id: run.id, cwd: folder });
+        // The source's size when it is one file (the file is written again when it grows): none for a folder or a database.
+        const { size, ...first } = lines[0];
+        assert.deepEqual(first, { type: 'keepplain-session', v: 1, agent, id: run.id, cwd: folder });
+        assert.ok(size === undefined || (Number.isInteger(size) && size > 0), `size ${size}`);
         const body = lines.slice(1).filter((l) => l.type !== 'custom-title');
         assert.ok(body.every((l) => l.cwd === folder && l.sessionId === run.id && /^2026-11-19T2\d:\d\d:\d\d\.\d{3}Z$/.test(l.timestamp)), 'every line has the folder, the session and its time');
         if (run.branch) assert.ok(body.every((l) => l.gitBranch === run.branch));
@@ -253,9 +256,16 @@ test('Gemini CLI: its log is replayed: a message rewound to is gone with all aft
     const records = parse(readFileSync(file, 'utf8'));
     const answer = records.findLast((r) => r.type === 'gemini' && r.content === 'done');
     const failing = records.findLast((r) => r.type === 'gemini' && r.content === 'Last, a file that is not there.');
-    writeFileSync(file, `${readFileSync(file, 'utf8')}${JSON.stringify({ $patch: { id: answer.id, content: 'done, twice' } })}\n`);
+    // Written within the step of the file system's clock it was read in (Linux moves it every few milliseconds): its
+    // time stays as it was, and the session is read again all the same.
+    const append = (record) => {
+        const { atime, mtime } = statSync(file);
+        writeFileSync(file, `${readFileSync(file, 'utf8')}${JSON.stringify(record)}\n`);
+        utimesSync(file, atime, mtime);
+    };
+    append({ $patch: { id: answer.id, content: 'done, twice' } });
     assert.equal(read().at(-1).message.content[0].text, 'done, twice');
-    writeFileSync(file, `${readFileSync(file, 'utf8')}${JSON.stringify({ $rewindTo: failing.id })}\n`);
+    append({ $rewindTo: failing.id });
     const rewound = read();
     assert.equal(rewound.filter((l) => l.type === 'assistant' && l.message.content[0].type === 'tool_use').length, 4);
     assert.ok(!JSON.stringify(rewound).includes('definitely-missing'));

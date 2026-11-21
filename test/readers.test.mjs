@@ -83,7 +83,7 @@ test('Grok: a live session read as Claude Code\'s lines', () => {
     assert.ok(Math.abs(statSync(session.path).mtimeMs - statSync(source).mtimeMs) < 2);
 
     const lines = parse(readFileSync(session.path, 'utf8'));
-    assert.deepEqual(lines[0], { type: 'keepplain-session', v: 1, agent: 'grok', id, cwd });
+    assert.deepEqual(lines[0], { type: 'keepplain-session', v: 1, agent: 'grok', id, cwd, size: statSync(source).size });
     const prompts = lines.filter((l) => l.type === 'user' && typeof l.message.content === 'string').map((l) => l.message.content);
     assert.equal(prompts.length, 2);
     assert.match(prompts[0], /^Edit hello\.txt: replace hi with hello\./);

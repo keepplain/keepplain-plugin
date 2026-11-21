@@ -58,20 +58,35 @@ function header(path) {
     }
 }
 
+/** The size of a session's source when it is one file (most agents' are), or null (a folder, a database's row). */
+function sourceSize(source) {
+    try {
+        const s = typeof source === 'string' ? statSync(source) : null;
+
+        return s?.isFile() ? s.size : null;
+    } catch {
+        return null;
+    }
+}
+
 /**
  * The file of ours for a session the reader listed: written when there is none, when the agent's copy changed since
- * (the file carries its time), or when another version of the readers wrote it. Null when the reader cannot read it.
+ * (the file carries its time, and its first line the source's size), or when another version of the readers wrote it.
+ * Null when the reader cannot read it. The size too: a file system's clock moves in steps (a few milliseconds on Linux),
+ * and an agent that appends within the step it was last read in leaves its time as it was.
  */
 function written(agent, session, env) {
     const path = join(dir(agent, env), `${session.id}.jsonl`);
+    const size = sourceSize(session.source);
     try {
-        if (Math.abs(statSync(path).mtimeMs - session.mtimeMs) < 2 && header(path)?.v === VERSION) return path;
+        const first = Math.abs(statSync(path).mtimeMs - session.mtimeMs) < 2 ? header(path) : null;
+        if (first?.v === VERSION && (first.size ?? null) === size) return path;
     } catch {
         // not written yet
     }
     try {
         const lines = READERS[agent].read(session.source, session, env);
-        const first = { type: 'keepplain-session', v: VERSION, agent, id: session.id, ...(session.cwd ? { cwd: session.cwd } : {}) };
+        const first = { type: 'keepplain-session', v: VERSION, agent, id: session.id, ...(session.cwd ? { cwd: session.cwd } : {}), ...(size === null ? {} : { size }) };
         writePrivate(path, `${[first, ...lines].map((l) => JSON.stringify(l)).join('\n')}\n`);
         const at = new Date(session.mtimeMs);
         utimesSync(path, at, at);
