@@ -1,0 +1,37 @@
+name: Local probe
+
+# Stage L0 of the local app: whether the SQLite under Bun has FTS5 (unicode61 and trigram), JSON and WAL on every
+# platform the program ships for, run as a script and compiled the way scripts/build.mjs compiles the program.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/local-core']
+    paths: ['scripts/local/**', '.github/workflows/local-probe.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: linux-x64, os: ubuntu-latest }
+          - { target: linux-arm64, os: ubuntu-24.04-arm }
+          - { target: darwin-x64, os: macos-15-intel }
+          - { target: darwin-arm64, os: macos-latest }
+          - { target: windows-x64, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: As a script
+        run: bun scripts/local/probe.mjs
+      - name: Compiled
+        shell: bash
+        run: |
+          bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig scripts/local/probe.mjs --outfile probe-bin
+          ./probe-bin
