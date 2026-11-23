@@ -2,7 +2,13 @@
 
 Your coding agent forgets everything when a session ends. [KeepPlain](https://keepplain.com) keeps that history: send a Claude Code session as a private draft, find what you already solved, and see how other developers got past the same problem.
 
-This is the copy of the plugin for Claude's plugin directory: skills and the KeepPlain library. It has no hooks and no background work. A session leaves your computer only after you run `/keepplain:build` and say yes; the searches your agent makes in the public library send a few words about the task, never the session.
+This is the copy of the plugin for Claude's plugin directory: skills and the KeepPlain library, and no code. It has no hooks, no background work and no program of its own: its skills run the KeepPlain program you install separately (see [Before you start](#before-you-start)). A session leaves your computer only after you run `/keepplain:build` and say yes; the searches your agent makes in the public library send a few words about the task, never the session.
+
+## Before you start
+
+Install the KeepPlain program: the KeepPlain app for macOS or Windows, or the command-line program for macOS, Linux and Windows, both described at [keepplain.com/plugins](https://keepplain.com/plugins). Either one puts the program `keepplain` in `~/.keepplain/bin`. The skills run it as `keepplain`, or by that path when it is not on your `PATH`. Nothing in this plugin downloads or installs it.
+
+Without the program, only `/keepplain:lookup` works: it uses the library's MCP server, not the program. The other skills say the program is missing and stop.
 
 ## Commands
 
@@ -17,19 +23,17 @@ This is the copy of the plugin for Claude's plugin directory: skills and the Kee
 | `/keepplain:share` | Shows the block for a published Build and, after your yes, puts it in the pull request or the README. |
 | `/keepplain:handoff` | Builds a brief of this session on this computer, without a model, and prints the command that starts another agent on it. Sends nothing. |
 
-Needs Node.js 20 or newer.
-
 ## What this copy does not do
 
 These need hooks, which this copy does not have: sending sessions by itself (auto mode), the git snapshots that show which code each turn changed, your KeepPlain rules added to each session, and the offer to continue in another agent when a usage limit is near. Without the snapshots, `/keepplain:build` takes the diffs from the agent's own edits in the session. To save later progress on a task, send the session again.
 
-The full program, with those features, is a separate install you choose yourself: [keepplain.com/plugins](https://keepplain.com/plugins). Nothing in this copy downloads or installs it. Use one or the other in Claude Code: both together give you the same commands twice.
+The program can set those up for Claude Code too (`keepplain enable`), but only when you run that yourself; no skill of this copy runs it. Use one or the other in Claude Code: both together give you the same commands twice.
 
 ## What it runs
 
-Every skill runs one program from this plugin, as readable source: `node "${CLAUDE_PLUGIN_ROOT}/scripts/keepplain.mjs" <command>`, with one of `preview`, `send`, `discard`, `login`, `logout`, `context`, `mcp-call`, `handoff`, `use`, `share`. Besides those it answers only `whoami`, `version` and `help`, and turns down anything else. It runs when a skill runs it, and exits when it is done.
+The skills run the installed program, `keepplain <command>`, with one of `preview`, `send`, `discard`, `login`, `logout`, `context`, `mcp-call`, `handoff`, `use`, `share`, and nothing else. Each command is written out in full in its skill. The program runs when a skill runs it, and exits when it is done. It is open source under the MIT license: [keepplain/keepplain-plugin](https://github.com/keepplain/keepplain-plugin), where `scripts/keepplain.mjs` is the program and its README describes every command. What follows is what those ten commands do.
 
-It reads the session's file (`~/.claude/projects/<project>/<session>.jsonl`). To tell which session this one continues, it compares the line ids of the same project's sessions of the last 30 days and reads the Claude desktop app's record of the conversation (`claude-code-sessions` in the app's data folder); of that, only the id of the session continued and when this one left it can leave the computer.
+For these commands the program reads the session's file (`~/.claude/projects/<project>/<session>.jsonl`). To tell which session this one continues, it compares the line ids of the same project's sessions of the last 30 days and reads the Claude desktop app's record of the conversation (`claude-code-sessions` in the app's data folder); of that, only the id of the session continued and when this one left it can leave the computer.
 
 That program starts these other programs on your computer, and no others:
 
@@ -41,7 +45,7 @@ That program starts these other programs on your computer, and no others:
 
 ## What leaves your computer
 
-Everything goes to `https://keepplain.com` (or the site you set in the plugin option `url`), except where the table says otherwise.
+Everything goes to `https://keepplain.com` (or the site in `KEEPPLAIN_URL`), except where the table says otherwise.
 
 | Call | When | What goes |
 | --- | --- | --- |
@@ -50,7 +54,7 @@ Everything goes to `https://keepplain.com` (or the site you set in the plugin op
 | `POST /api/v1/imports`, `GET /api/v1/imports/{id}` | `/keepplain:build`, after your yes | The slimmed, checked session, described below. The token. |
 | `/mcp` `start_session_upload`, a `PUT` to the link it returns, `/mcp` `finish_session_upload` | `/keepplain:build` in a cloud session with no token of its own, after your yes, through the KeepPlain connector | The same session in one JSON file, at a one-time link (15 minutes) in KeepPlain's storage (Cloudflare R2, `*.r2.cloudflarestorage.com`). |
 | `/mcp`, from the MCP server of this plugin | Your agent searches the public library | The query and the stack the agent writes. The agent is told never to put code, paths, names of repositories, companies or clients, hostnames, URLs or secrets in it. Never the session. The site keeps the query text, the filters and how many results it found for 180 days, not tied to you. |
-| `/mcp`, through `keepplain.mjs mcp-call` | `/keepplain:resume` | The words of the search, a key of the repository (a hash of its `origin` address, or of its path), the session id, the task it attaches to. The token. |
+| `/mcp`, through `keepplain mcp-call` | `/keepplain:resume` | The words of the search, a key of the repository (a hash of its `origin` address, or of its path), the session id, the task it attaches to. The token. |
 | `GET /b/<slug>/use/<format>.md`, `/t/<team>/rules/<stack>.md` | `/keepplain:use` | `via=cli`, the agent, `write=1` when it writes. The token only for a team's own Build or rules. |
 | `GET /api/v1/share`, `POST /api/v1/share/attachments` | `/keepplain:share` | The Build's slug or this session's id; after a change, the pull request's or the repository's address. The token. |
 | `gh pr view`, `gh pr list`, `gh pr edit`, to GitHub | `/keepplain:share --pr`, after your yes | The pull request's new description, with the block. Your own GitHub sign-in. |
@@ -65,10 +69,10 @@ A draft is private to you, or to your team when the session ran in one of the te
 
 Two kinds, and each goes to one place only:
 
-- **Your KeepPlain token.** Taken, in this order, from `KEEPPLAIN_TOKEN`, the plugin option `token` (`sensitive`, kept in the system keychain, empty unless you paste one), or what `/keepplain:login` saved for that site in `~/.keepplain/credentials.json`, readable by you only. It is KeepPlain's own token and goes only to the KeepPlain site it was issued for, as `Authorization: Bearer …`.
+- **Your KeepPlain token.** Taken, in this order, from `KEEPPLAIN_TOKEN`, or what `/keepplain:login` saved for that site in `~/.keepplain/credentials.json`, readable by you only. It is KeepPlain's own token and goes only to the KeepPlain site it was issued for, as `Authorization: Bearer …`.
 - **A proxy's `user:password`**, when your `HTTPS_PROXY` (or `HTTP_PROXY`, `ALL_PROXY`, or on Windows the manual proxy in Internet Settings) has one. It goes only to that proxy, as `Proxy-Authorization`, never to KeepPlain.
 
-Nothing else is read as a credential. From Claude Code's own `settings.json` it reads only the plugin option `url` (`pluginConfigs`), which is not a secret.
+Nothing else is read as a credential. This plugin itself reads no credential and no file: it has no code.
 
 ## The MCP server
 
@@ -100,14 +104,14 @@ Only after your yes:
 
 | Setting | Where | Default |
 | --- | --- | --- |
-| Site address | `KEEPPLAIN_URL`, or the plugin option `url` | `https://keepplain.com` |
-| Token | `/keepplain:login`; `KEEPPLAIN_TOKEN` or the plugin option `token` overrides it | none |
+| Site address | `KEEPPLAIN_URL` | `https://keepplain.com` |
+| Token | `/keepplain:login`; `KEEPPLAIN_TOKEN` overrides it | none |
 | Data folder | `KEEPPLAIN_HOME` | `~/.keepplain` |
 | Proxy | `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | none: direct |
 
 ## Source, support and license
 
-This copy is generated from [keepplain/keepplain-plugin](https://github.com/keepplain/keepplain-plugin) by `scripts/directory.mjs`, which is where its tests live.
+This copy is generated from [keepplain/keepplain-plugin](https://github.com/keepplain/keepplain-plugin) by `scripts/directory.mjs`, which is where its tests live, together with the program its skills run.
 
 - Questions and problems: [hello@keepplain.com](mailto:hello@keepplain.com), or an issue in that repository. Privacy and security reports: [privacy@keepplain.com](mailto:privacy@keepplain.com).
 - What KeepPlain stores and why: the [privacy policy](https://keepplain.com/privacy). The rules for using the site: the [terms](https://keepplain.com/terms).

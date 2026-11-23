@@ -111,7 +111,6 @@ import { fileRepository, folderGitContexts, gitContext, normalizeRemote, project
 import { AGENT_IDS, AGENTS, agentArgs, agentId, commandIn, hasPluginOptions } from './lib/agent.mjs';
 import { detectAgents } from './lib/detect.mjs';
 import { program } from './lib/programs.mjs';
-import { EDITION, editionRuns, notInThisCopy } from './lib/edition.mjs';
 import { AGENTS as USE_AGENTS, FORMATS as USE_FORMATS, agentOf, buildSlug, findBlock, lineDiff, projectRoot, readUses, recordUse, ruleTarget, shown, skillName, withBlock, writeText } from './lib/playbooks.mjs';
 import { proxyFor, request } from './lib/http.mjs';
 import { describeLibrary, LibraryWatch } from './lib/library.mjs';
@@ -184,13 +183,12 @@ const token = env.KEEPPLAIN_TOKEN || env.CLAUDE_PLUGIN_OPTION_TOKEN || savedToke
 const VIA_CONNECTOR = args.includes('--connector') || Boolean(option('upload')) || (env.CLAUDE_CODE_REMOTE === 'true' && !token && AGENT.id === 'claude-code');
 
 // What sets the agents up or replaces this program (lib/enable.mjs, githooks.mjs, hooks.mjs, update.mjs, agents.mjs) is
-// imported where it is used, not above: the copy in Claude's plugin directory leaves those files out (lib/edition.mjs).
+// imported where it is used, not above: most commands never need them.
 if (BINARY_VERSION) (await import('./lib/update.mjs')).removeLeftover();
 // Previews nobody sent: gone PREPARED_TTL_MS after they were made, whatever runs next (lib/prepared.mjs).
 sweepPrepared();
 
 try {
-    if (!editionRuns(command)) throw new Failure(notInThisCopy(command));
     // First and alone: it runs at every connection of the MCP server, and must answer with JSON whatever happens.
     if (command === 'mcp-headers') {
         mcpHeaders();
@@ -251,7 +249,7 @@ try {
     else if (command === 'help' || command === '-h' || args.includes('--help')) console.log(help());
     else throw new Failure(`${command ? `Unknown command "${command}".\n` : ''}${help()}`);
     // Only to a person at a terminal: never into an agent's context, nor from hooks and background runs.
-    if (TERMINAL && command !== 'update' && editionRuns('update')) (await import('./lib/update.mjs')).updateNotice(VERSION);
+    if (TERMINAL && command !== 'update') (await import('./lib/update.mjs')).updateNotice(VERSION);
 } catch (e) {
     const message = e instanceof Failure ? e.message : `Unexpected error: ${e?.message ?? e}`;
     if (JSON_OUT) emit({ error: message, ...(e?.details ? { details: e.details } : {}) });
@@ -291,10 +289,9 @@ function help() {
         ['version', 'the version of keepplain'],
         ['help', 'this list'],
     ];
-    const here = commands.filter(([c]) => editionRuns(c.split(' ')[0]) && (EDITION === 'full' || !/^(share auto|handoff on)/.test(c)));
-    const width = Math.max(...here.map(([c]) => c.length));
+    const width = Math.max(...commands.map(([c]) => c.length));
 
-    return ['Usage: keepplain <command> [--site=URL] [--agent=codex] [--json]', ...here.map(([c, what]) => `  ${c.padEnd(width)}  ${what}`)].join('\n');
+    return ['Usage: keepplain <command> [--site=URL] [--agent=codex] [--json]', ...commands.map(([c, what]) => `  ${c.padEnd(width)}  ${what}`)].join('\n');
 }
 
 /** The options of enable and disable. */
@@ -951,14 +948,12 @@ async function waitForApproval(until = Date.now() + LOGIN_WAIT_MS) {
         if (state.status === 'approved') {
             saveToken(site, state.token, state.username);
             clearPendingLogin();
-            // A Claude Code started before the sign-in noted the server's 401 and keeps it for about 15 minutes. In the
-            // directory's copy the note stays true: its server has its own sign-in, not this one.
-            if (EDITION === 'full') (await import('./lib/agents.mjs')).forgetMcpNeedsAuth();
+            // A Claude Code started before the sign-in noted the server's 401 and keeps it for about 15 minutes.
+            (await import('./lib/agents.mjs')).forgetMcpNeedsAuth();
             // The import of past sessions agreed to before the sign-in (enable), or waiting for a new one, goes on now.
             const past = pastState(site);
-            const waiting = EDITION === 'full' && past?.status === 'login' && past.queue?.length;
-            // The directory's copy has no background work, and no import of past sessions to go on with.
-            const importGoesOn = EDITION === 'full' && (waiting || pastDue(site));
+            const waiting = past?.status === 'login' && past.queue?.length;
+            const importGoesOn = waiting || pastDue(site);
             if (waiting) setPastState(site, { status: 'running', started_at: past.started_at ?? Date.now(), next_at: null, why: null });
             if (JSON_OUT) {
                 if (importGoesOn) inBackground(['import-past', 'run', `--site=${site}`]);
@@ -973,8 +968,7 @@ async function waitForApproval(until = Date.now() + LOGIN_WAIT_MS) {
             }
             if (importGoesOn) inBackground(['import-past', 'run', `--site=${site}`]);
             if (waiting) console.log(pastStartedLine(past.queue.length, true));
-            if (EDITION !== 'full') console.log('/keepplain:resume can read your own sessions now. The library tools search without an account; for your team\'s sessions and higher limits they sign in on their own: /mcp, choose keepplain.');
-            else if (AGENT.id === 'claude-code') console.log('If Claude Code is open, run /mcp → Reconnect for keepplain, or start a new session: its library tools connect then.');
+            if (AGENT.id === 'claude-code') console.log('If Claude Code is open, run /mcp → Reconnect for keepplain, or start a new session: its library tools connect then.');
             return;
         }
         if (state.status !== 'pending') {
@@ -1407,7 +1401,6 @@ The rules for ${[...new Set(entry.matched.map((r) => r.label))].join(', ')} come
  * Nothing is published here: a draft gets its link, to publish it first.
  */
 async function share(what) {
-    if (what === 'auto' && !editionRuns('share-auto')) throw new Failure(notInThisCopy('share auto'));
     if (what === 'auto') return shareAutoMode(positional[2]);
     if (!token) throw notConnected();
     const slug = what ? buildSlug(what) : null;
@@ -1596,7 +1589,6 @@ async function useAgent() {
         if (!agent) throw new Failure(`--agent takes claude, codex, cursor, pi or antigravity, not "${given}".`);
         return agent;
     }
-    if (EDITION !== 'full') return agentOf('claude');
     if (!TERMINAL) throw new Failure('Say which agent it is for: --agent=claude, --agent=codex, --agent=cursor, --agent=pi or --agent=antigravity.');
 
     const { installedPlugins } = await import('./lib/agents.mjs');
@@ -2426,8 +2418,6 @@ function nudge(mode) {
  */
 async function handoff(what) {
     if (what === 'on' || what === 'off' || /^\d+$/.test(what ?? '')) {
-        // The offer itself is the hooks module's: the directory's copy has only /keepplain:handoff.
-        if (EDITION !== 'full') throw new Failure(notInThisCopy(`handoff ${what}`));
         setHandoff(what);
         if (JSON_OUT) return emit({ handoff: handoffOn(), threshold: handoffThreshold() });
         return console.log(handoffOn() ? `When a limit of ${AGENT.name} passes ${handoffThreshold()}%, it offers to continue in another agent on this computer, with a brief of the session. Turn it off with: handoff off` : 'The offer to continue in another agent is off. Turn it on with: handoff on');
@@ -2461,8 +2451,7 @@ async function handoff(what) {
         lines.push(target ? `Or start ${target.name} on it:` : 'Or start the next agent on it:');
         for (const c of commands) lines.push(c.command ? `  ${c.command}` : `  ${c.name}: no command line here; paste the brief into its chat.`);
     } else lines.push(`No other agent found on this computer (${SESSION_KINDS}).`);
-    // Nothing sends a session by itself in the directory's copy: the next agent can read only what was sent.
-    lines.push(EDITION === 'full' ? `Sign in (${run('login')}) and the next agent reads the whole session instead, on any machine: ${run('resume')}.` : `Send this session (${run('build')}) and the next agent can read all of it instead, on any machine: ${run('resume')}.`);
+    lines.push(`Sign in (${run('login')}) and the next agent reads the whole session instead, on any machine: ${run('resume')}.`);
     console.log(lines.join('\n'));
 }
 

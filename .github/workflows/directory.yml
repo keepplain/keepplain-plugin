@@ -1,7 +1,7 @@
 name: Directory
 
 # Each release puts the copy of the plugin for Claude's plugin directory on the branch `directory`, which the directory
-# reads (scripts/directory.mjs): the skills and the program, without hooks, a mod or a header helper. The rest of the
+# reads (scripts/directory.mjs): the skills and the library's server, with no code; the skills run the installed program. The rest of the
 # repository, and the plugin the GitHub marketplace and `keepplain enable` give people, stay as they are.
 on:
   push:
