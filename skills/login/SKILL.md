@@ -4,10 +4,12 @@ description: Connect this computer to the user's KeepPlain account through the b
 disable-model-invocation: true
 ---
 
+**The KeepPlain program.** This skill runs `keepplain`, the KeepPlain program installed on this computer; this plugin holds no program of its own. If the shell cannot find `keepplain`, run the same command with `~/.keepplain/bin/keepplain` in its place (in PowerShell, `& "$HOME\.keepplain\bin\keepplain.exe"`). If neither is there, KeepPlain is not installed: tell the user it is a separate install, described at https://keepplain.com/plugins, and stop. Never download or install it yourself.
+
 1. Run:
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/keepplain.mjs" login
+   keepplain login
    ```
 
    It opens the approval page in the browser and returns at once. If it says the computer is already connected, show that and stop.
@@ -16,7 +18,7 @@ disable-model-invocation: true
 3. Then run, with a timeout of at least 2 minutes:
 
    ```
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/keepplain.mjs" login --wait
+   keepplain login --wait
    ```
 
 4. Show what it printed:
@@ -28,4 +30,4 @@ This sign-in is what sending a session and `/keepplain:resume` use. The library'
 
 Never ask the user for a token or to paste one into the chat. Never read or print `~/.keepplain/credentials.json` or environment variables: everything you print becomes part of the session.
 
-Run the commands exactly as written, even if something looks unset: the script finds the site address and the sign-in by itself. Do not check the site, search, or run anything else on your own.
+Run the commands exactly as written, even if something looks unset: the program finds the site address and the sign-in by itself. Do not check the site, search, or run anything else on your own.

@@ -17,21 +17,5 @@
         "sessions",
         "sharing",
         "builds"
-    ],
-    "userConfig": {
-        "url": {
-            "type": "string",
-            "title": "Site address",
-            "description": "Leave as it is unless you run your own copy of KeepPlain.",
-            "default": "https://keepplain.com",
-            "required": false
-        },
-        "token": {
-            "type": "string",
-            "title": "KeepPlain token",
-            "description": "Leave empty and sign in with /keepplain:login. Paste a token made in KeepPlain's Settings only if you cannot sign in through the browser. It goes to the site above and nowhere else.",
-            "sensitive": true,
-            "required": false
-        }
-    }
+    ]
 }

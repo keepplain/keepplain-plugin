@@ -2,7 +2,6 @@
 name: lookup
 description: Look up how other developers did a similar task with a coding agent in the KeepPlain library - published sessions with the prompt that worked, where the agent went wrong and what the human did. Use before a non-trivial task on a known stack (a migration, an integration, a setup), after two or three failed attempts at the same problem, or when the user asks how others did something. Not for small edits or questions about this repository's own code.
 argument-hint: "[the task in a few words]"
-allowed-tools: mcp__plugin_keepplain_keepplain__search_coding_agent_sessions, mcp__plugin_keepplain_keepplain__get_coding_agent_session, mcp__plugin_keepplain_keepplain__find_coding_agent_failures
 ---
 
 KeepPlain is a library of real coding-agent sessions that developers published. The plugin's `keepplain` MCP server reads it with three tools: `search_coding_agent_sessions` (sessions of a similar task), `get_coding_agent_session` (one session: `brief` first, `moments` for the detail) and `find_coding_agent_failures` (where agents failed on a similar problem, and what the human did). If they are listed only by name, load them first.
