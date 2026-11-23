@@ -1,5 +1,8 @@
 # KeepPlain
 
+[![mcptry](https://mcptry.com/badge/com.keepplain/keepplain)](https://mcptry.com/servers/com.keepplain/keepplain)
+[![KeepPlain MCP connector – tool definition quality and endpoint health on Glama](https://glama.ai/mcp/connectors/com.keepplain/keepplain/badges/score.svg)](https://glama.ai/mcp/connectors/com.keepplain/keepplain)
+
 Your coding agent forgets everything when a session ends. [KeepPlain](https://keepplain.com) keeps that history, so you stop explaining the same thing twice.
 
 Works with Claude Code, Codex, Cursor, Pi and Antigravity, and reads the sessions of GitHub Copilot CLI, Gemini CLI, OpenCode, Kilo Code, Cline, Junie, Qwen Code, Mistral Vibe, Factory Droid, Goose, Crush and Grok [where they keep them](#the-other-agents). Free for personal use, teams pay per seat.
